@@ -1081,38 +1081,59 @@ def stock():
     return jsonify({'locations': list(locs.values()), 'pending_from_vendors': pending, 'goods_received': goods})
 
 # ── MATERIAL REQUIREMENT ──────────────────────────────────────────────────────
-def requirement(stitch_order_ids):
-    """Cloth needed by the given stitch orders, set against what is already arranged.
-    'at tailor' counts cloth with (or on the way to) the tailors of these orders;
-    'pending' is what linked cloth orders still have to despatch."""
+REMAINING_SQL = """MAX(i.qty - (SELECT COALESCE(SUM(di.qty),0) FROM stitch_delivery_items di
+                   WHERE di.order_item_id=i.id), 0) * i.cons_per_pc"""
+
+def requirement(stitch_order_ids, exclude_cloth_order=None):
+    """Cloth still to be ordered to finish the given stitch orders, per cloth:
+
+        to_order = to_finish - free_at_tailor - on_order
+
+    to_finish      : metres for the pieces not yet received (pieces left x cloth per piece)
+    free_at_tailor : cloth with / on the way to these orders' tailors, less what the same
+                     tailors' other open orders still need of it
+    on_order       : still to be despatched on cloth orders linked to these stitch orders
+                     (leaving out exclude_cloth_order — the one being edited)
+    in_godown      : your own stock, which could be sent instead of ordering"""
     if not stitch_order_ids: return []
     ph = ','.join('?' * len(stitch_order_ids))
-    need = rows(q(f"""SELECT i.cloth_id, c.name cloth_name, c.unit, SUM(i.qty*i.cons_per_pc) required
+    need = rows(q(f"""SELECT i.cloth_id, c.name cloth_name, c.unit, SUM(i.qty*i.cons_per_pc) required,
+        SUM({REMAINING_SQL}) to_finish
         FROM stitch_order_items i JOIN cloths c ON c.id=i.cloth_id WHERE i.order_id IN ({ph}) AND i.cloth_id IS NOT NULL
         GROUP BY i.cloth_id ORDER BY c.name""", stitch_order_ids))
-    tailors = {r[0] for r in q(f"SELECT DISTINCT vendor_id FROM stitch_orders WHERE id IN ({ph})", stitch_order_ids)}
+    tailors = [r[0] for r in q(f"SELECT DISTINCT vendor_id FROM stitch_orders WHERE id IN ({ph})", stitch_order_ids)]
+    tph = ','.join('?' * len(tailors))
+    other = {r['cloth_id']: r['need'] or 0 for r in q(f"""SELECT i.cloth_id, SUM({REMAINING_SQL}) need
+        FROM stitch_order_items i JOIN stitch_orders o ON o.id=i.order_id
+        WHERE o.closed=0 AND o.vendor_id IN ({tph}) AND o.id NOT IN ({ph}) AND i.cloth_id IS NOT NULL
+        GROUP BY i.cloth_id""", (*tailors, *stitch_order_ids))}
     pos = stock_positions()
     pend = collections.defaultdict(float)
     for r in q(f"""SELECT i.cloth_id, i.qty - (SELECT COALESCE(SUM(d.qty),0) FROM cloth_despatches d
                      WHERE d.order_id=i.order_id AND d.cloth_id=i.cloth_id) pending
                    FROM cloth_order_items i JOIN cloth_orders o ON o.id=i.order_id
-                   WHERE o.closed=0 AND o.id IN (SELECT cloth_order_id FROM cloth_order_links WHERE stitch_order_id IN ({ph}))""",
-               stitch_order_ids):
+                   WHERE o.closed=0 AND o.id<>? AND o.id IN (SELECT cloth_order_id FROM cloth_order_links WHERE stitch_order_id IN ({ph}))""",
+               (exclude_cloth_order or '', *stitch_order_ids)):
         pend[r['cloth_id']] += max(r['pending'], 0)
     for n in need:
         cid = n['cloth_id']
-        n['at_tailor'] = round(sum(pos[(t, cid)]['stock'] + pos[(t, cid)]['transit'] for t in tailors if (t, cid) in pos), 3)
-        n['in_godown'] = round(pos[(SELF, cid)]['stock'] if (SELF, cid) in pos else 0, 3)
+        at = sum(pos[(t, cid)]['stock'] + pos[(t, cid)]['transit'] for t in tailors if (t, cid) in pos)
+        n['at_tailor'] = round(at, 3)
+        n['for_other_orders'] = round(min(other.get(cid, 0), max(at, 0)), 3)
+        n['free_at_tailor'] = round(max(at - other.get(cid, 0), 0), 3)
+        n['in_godown'] = round(max(pos[(SELF, cid)]['stock'], 0) if (SELF, cid) in pos else 0, 3)
         n['on_order'] = round(pend[cid], 3)
         n['required'] = round(n['required'] or 0, 3)
-        n['short'] = round(max(n['required'] - n['at_tailor'] - n['on_order'], 0), 3)
+        n['to_finish'] = round(n['to_finish'] or 0, 3)
+        n['to_order'] = round(max(n['to_finish'] - n['free_at_tailor'] - n['on_order'], 0), 3)
+        n['short'] = n['to_order']
     return need
 
 @app.route('/api/requirement')
 @require_auth
 def requirement_api():
     ids = [x for x in (request.args.get('stitch_order_ids') or '').split(',') if x]
-    return jsonify(requirement(ids))
+    return jsonify(requirement(ids, request.args.get('exclude_cloth_order')))
 
 # ── COSTING ───────────────────────────────────────────────────────────────────
 def costing(order_id=None):
