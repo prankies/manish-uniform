@@ -103,12 +103,28 @@ table.t{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:
 .chk{display:flex;align-items:center;gap:10px;padding:6px 0 14px;font-weight:600;font-size:14px}
 .chk input{width:20px;height:20px}
 .note{font-size:12.5px;color:var(--mut);padding:4px 4px 12px}
+.top .ib{color:#fff}
+.blk{background:#fff;border:1px solid var(--ln);border-radius:14px;padding:12px 12px 4px;margin-bottom:12px;position:relative}
+.blk .x{position:absolute;top:6px;right:6px;width:32px;height:32px;border-radius:8px;color:var(--bad);font-size:20px}
+.blk .fld{margin-bottom:10px}
+.blk-h{font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px}
+table.sg{width:100%;border-collapse:collapse;margin:4px 0 8px;font-variant-numeric:tabular-nums}
+.sg th{font-size:11px;color:var(--mut);font-weight:700;text-align:left;padding:4px 4px;text-transform:uppercase}
+.sg td{padding:3px 4px}
+.sg td:first-child{font-weight:700;width:64px}
+.sg input{width:100%;padding:8px 8px;border:1px solid #D0D5DD;border-radius:8px;font-size:16px;min-height:40px;background:#fff}
+.sg input:focus{outline:none;border-color:var(--pri2)}
+.sg input.auto{color:var(--mut)}
+.sg .hint{font-size:11px;color:var(--mut);display:block}
+.sg tr.has td:first-child{color:var(--pri2)}
+.sub{font-size:12.5px;color:var(--mut);margin:-2px 0 10px}
+.menu-li{font-size:15px}
 </style>
 </head>
 <body>
 <div id="root"></div>
 <script>
-const {useState,useEffect,useMemo,createElement:h,Fragment}=React;
+const {useState,useEffect,createElement:h,Fragment}=React;
 
 // ── API (same token scheme as GPCI ERP) ─────────────────────────────────────
 let TOKEN=localStorage.getItem('mu_tok');
@@ -138,7 +154,9 @@ const fd=d=>d?new Date(d+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',
 const today=()=>{const d=new Date();d.setMinutes(d.getMinutes()-d.getTimezoneOffset());return d.toISOString().slice(0,10);};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const num=v=>parseFloat(v)||0;
+const r2=v=>Math.round(v*100)/100;
 const FIRM='Manish Uniform';
+let _k=0;const key=()=>'k'+(++_k);
 
 let _toast=null;
 const toast=m=>_toast&&_toast(m);
@@ -148,10 +166,10 @@ function Toast(){const[m,setM]=useState(null);useEffect(()=>{let t;_toast=x=>{se
 const I=d=>h('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:2,strokeLinecap:'round',strokeLinejoin:'round'},...d.map(p=>h('path',{d:p})));
 const ICONS={
   home:['M3 11l9-8 9 8','M5 10v10h14V10'],
+  school:['M2 9l10-5 10 5-10 5-10-5z','M6 11v5c3 2 9 2 12 0v-5'],
   stitch:['M4 20L20 4','M14 4h6v6','M4 14l6 6','M8 8l2 2'],
   cloth:['M4 6h16v12H4z','M4 10h16','M4 14h16'],
-  stock:['M3 7l9-4 9 4-9 4-9-4z','M3 12l9 4 9-4','M3 17l9 4 9-4'],
-  more:['M5 12h.01','M12 12h.01','M19 12h.01'],
+  reports:['M4 20V10','M10 20V4','M16 20v-7','M22 20H2'],
 };
 
 // ── small UI helpers ────────────────────────────────────────────────────────
@@ -165,6 +183,17 @@ const Spin=()=>h('div',{className:'center'},h('div',{className:'sp'}));
 const Empty=t=>h('div',{className:'es'},t);
 const Tag=(t,k='mut')=>h('span',{className:'tag t-'+k},t);
 
+// Dropdown whose last option adds a new entry on the spot
+function SelAdd({value,onChange,opts,placeholder,noun,onAdd}){
+  const change=async e=>{const v=e.target.value;
+    if(v!=='__add'){onChange(v);return;}
+    const name=(prompt(`New ${noun} name`)||'').trim();if(!name)return;
+    try{onChange(await onAdd(name));toast(`${noun[0].toUpperCase()+noun.slice(1)} added`);}catch(x){alert(x.message);}};
+  return h('select',{className:'in',value:value??'',onChange:change},
+    h('option',{value:''},placeholder||'Select'),...opts.map(o=>h('option',{key:o.value,value:o.value},o.label)),
+    h('option',{value:'__add'},`+ Add new ${noun}…`));
+}
+
 function Sheet({title,onClose,children,foot,right}){
   useEffect(()=>{document.body.style.overflow='hidden';return()=>{document.body.style.overflow='';};},[]);
   return h('div',{className:'sheet-ov'},h('div',{className:'sheet'},
@@ -175,22 +204,38 @@ function Sheet({title,onClose,children,foot,right}){
 
 function useLoad(path,deps=[]){
   const[d,setD]=useState(null);const[e,setE]=useState(null);
-  const load=()=>GET(path).then(x=>{setD(x);setE(null);}).catch(x=>setE(x.message));
+  const load=()=>path?GET(path).then(x=>{setD(x);setE(null);}).catch(x=>setE(x.message)):Promise.resolve();
   useEffect(()=>{load();},[path,...deps]);
   return[d,load,e];
 }
 
-// masters shared across the app
+// ── masters ─────────────────────────────────────────────────────────────────
 function vendorOpts(M,types){return M.vendors.filter(v=>v.active&&types.includes(v.type)).map(v=>({value:v.id,label:v.name}));}
 function locOpts(M){return[{value:'self',label:FIRM+' (own godown)'},...vendorOpts(M,['stitch','both'])];}
-function clothOpts(M){return M.cloths.filter(c=>c.active).map(c=>({value:c.id,label:c.name+(c.colour?' · '+c.colour:'')}));}
+function clothOpts(M,keep){return M.cloths.filter(c=>c.active||c.id===keep).map(c=>({value:c.id,label:c.name+(c.colour?' · '+c.colour:'')+(c.width?` · ${qn(c.width)}"`:'')}));}
+function schoolOpts(M,keep){return M.schools.filter(s=>s.active||s.id===keep).map(s=>({value:s.id,label:s.name}));}
+function itemOpts(M,keep){return M.items.filter(i=>i.active||i.id===keep).map(i=>({value:i.id,label:i.name}));}
 function locName(M,id){if(id==='self')return FIRM;const v=M.vendors.find(x=>x.id===id);return v?v.name:'?';}
 function clothOf(M,id){return M.cloths.find(c=>c.id===id)||{};}
+function itemOf(M,id){return M.items.find(c=>c.id===id)||{sizes:[]};}
+const addSchool=M=>async name=>{const r=await POST('/m/schools',{name});await M.reload();return r.id;};
+const addItem=M=>async name=>{const r=await POST('/items',{name,sizes:[]});await M.reload();return r.id;};
+const addCloth=M=>async name=>{const w=num(prompt('Cloth width in inches',String(M.std_width)))||M.std_width;const r=await POST('/m/cloths',{name,width:w});await M.reload();return r.id;};
+const addVendor=(M,type)=>async name=>{const r=await POST('/m/vendors',{name,type});await M.reload();return r.id;};
 
-// Save wrapper for forms
+// cloth per piece from the size chart, corrected for the cloth's actual width
+function consFor(M,itemId,size,width){
+  const it=itemOf(M,itemId);const s=it.sizes.find(x=>x.size===size);if(!s)return '';
+  const f=it.width_scaling&&num(width)?it.base_width/num(width):1;return r2(s.cons*f);
+}
+function sizeList(M,itemId,extra){
+  const chart=itemOf(M,itemId).sizes.map(s=>s.size);
+  return[...chart,...Object.keys(extra||{}).filter(s=>!chart.includes(s))];
+}
+
 function useSaver(onDone){
   const[busy,setBusy]=useState(false);const[err,setErr]=useState('');
-  const run=async fn=>{setBusy(true);setErr('');try{await fn();onDone&&onDone();}catch(x){setErr(x.message);}setBusy(false);};
+  const run=async fn=>{setBusy(true);setErr('');try{const r=await fn();onDone&&onDone(r);}catch(x){setErr(x.message);}setBusy(false);};
   return{busy,err,run,setErr};
 }
 
@@ -198,28 +243,32 @@ function useSaver(onDone){
 function printDoc(title,body){
   const w=window.open('','_blank');if(!w){toast('Allow pop-ups to print');return;}
   w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><style>
-  body{font-family:Arial,sans-serif;font-size:13px;color:#111;margin:24px}h1{font-size:22px;margin:0}h2{font-size:15px;margin:18px 0 6px}
+  body{font-family:Arial,sans-serif;font-size:13px;color:#111;margin:24px}h1{font-size:22px;margin:0}h2{font-size:14px;margin:16px 0 4px}
   .hd{display:flex;justify-content:space-between;border-bottom:2px solid #0F3D5E;padding-bottom:8px;margin-bottom:12px}
-  table{width:100%;border-collapse:collapse;margin-top:6px}th,td{border:1px solid #bbb;padding:6px 8px;text-align:left}th{background:#eef2f6}
+  table{width:100%;border-collapse:collapse;margin-top:6px}th,td{border:1px solid #bbb;padding:5px 8px;text-align:left}th{background:#eef2f6}
   .n{text-align:right}.m{color:#555}.sig{margin-top:50px;display:flex;justify-content:space-between}
   @media print{body{margin:10mm}}</style></head><body>${body}<script>setTimeout(()=>window.print(),300)<\/script></body></html>`);
   w.document.close();
 }
+function groupLines(items,keyFn){const m=new Map();items.forEach(i=>{const k=keyFn(i);if(!m.has(k))m.set(k,[]);m.get(k).push(i);});return[...m.entries()];}
 function printClothOrder(o){
-  const rows=o.items.map((i,k)=>`<tr><td>${k+1}</td><td>${esc(i.cloth_name)}${i.colour?' · '+esc(i.colour):''}</td><td class="n">${qn(i.qty)} ${esc(i.unit)}</td><td class="n">${rs2(i.rate)}</td><td class="n">${rs2(i.qty*i.rate)}</td></tr>`).join('');
+  const rows=o.items.map((i,k)=>`<tr><td>${k+1}</td><td>${esc(i.cloth_name)}${i.colour?' · '+esc(i.colour):''}</td><td class="n">${i.width?qn(i.width)+'"':''}</td><td class="n">${qn(i.qty)} ${esc(i.unit)}</td><td class="n">${rs2(i.rate)}</td><td class="n">${rs2(i.qty*i.rate)}</td></tr>`).join('');
   const tot=o.items.reduce((s,i)=>s+i.qty*i.rate,0);
   printDoc(o.number,`<div class="hd"><div><h1>${FIRM}</h1><div class="m">Cloth Purchase Order</div></div><div style="text-align:right"><b>${esc(o.number)}</b><br>Date: ${fd(o.date)}</div></div>
   <div><b>To:</b> ${esc(o.vendor_name)}${o.vendor_phone?' · '+esc(o.vendor_phone):''}<br>${esc(o.vendor_address||'')}</div>
-  <table><tr><th>#</th><th>Cloth</th><th class="n">Qty</th><th class="n">Rate</th><th class="n">Amount</th></tr>${rows}<tr><td colspan="4" class="n"><b>Total</b></td><td class="n"><b>${rs2(tot)}</b></td></tr></table>
+  <table><tr><th>#</th><th>Cloth</th><th class="n">Width</th><th class="n">Qty</th><th class="n">Rate</th><th class="n">Amount</th></tr>${rows}<tr><td colspan="5" class="n"><b>Total</b></td><td class="n"><b>${rs2(tot)}</b></td></tr></table>
   ${o.notes?`<p><b>Notes:</b> ${esc(o.notes)}</p>`:''}<p class="m">Please mention delivery location & challan no. on each despatch.</p><div class="sig"><span></span><span>For ${FIRM}</span></div>`);
 }
 function printStitchOrder(o){
-  const rows=o.items.map((i,k)=>`<tr><td>${k+1}</td><td>${esc(i.product_name)}${i.school?' ('+esc(i.school)+')':''}</td><td>${esc(i.size||'')}</td><td class="n">${qn(i.qty)}</td><td class="n">${rs2(i.rate)}</td><td>${esc(i.cloth_name||'')}</td><td class="n">${i.cons_per_pc?qn(i.cons_per_pc)+' '+esc(i.unit||'m'):''}</td></tr>`).join('');
+  const blocks=groupLines(o.items,i=>[i.school_name||'',i.item_name,i.cloth_name||'',i.rate].join('|')).map(([,ls])=>{const f=ls[0];
+    const tot=ls.reduce((s,i)=>s+i.qty,0),cl=ls.reduce((s,i)=>s+i.qty*i.cons_per_pc,0);
+    return `<h2>${esc(f.item_name)}${f.school_name?' — '+esc(f.school_name):''}</h2><div class="m">${f.cloth_name?'Cloth: '+esc(f.cloth_name)+(f.width?' ('+qn(f.width)+'")':''):''}${f.rate?' · Rate '+rs2(f.rate)+'/pc':''}</div>
+    <table><tr><th>Size</th><th class="n">Pcs</th><th class="n">Cloth/pc</th><th class="n">Cloth</th></tr>${ls.map(i=>`<tr><td>${esc(i.size||'')}</td><td class="n">${qn(i.qty)}</td><td class="n">${i.cons_per_pc?qn(i.cons_per_pc):''}</td><td class="n">${i.cons_per_pc?qn(i.qty*i.cons_per_pc):''}</td></tr>`).join('')}
+    <tr><td><b>Total</b></td><td class="n"><b>${qn(tot)}</b></td><td></td><td class="n"><b>${cl?qn(cl)+' m':''}</b></td></tr></table>`;}).join('');
   printDoc(o.number,`<div class="hd"><div><h1>${FIRM}</h1><div class="m">Stitching Order</div></div><div style="text-align:right"><b>${esc(o.number)}</b><br>Date: ${fd(o.date)}${o.due_date?'<br>Deliver by: '+fd(o.due_date):''}</div></div>
-  <div><b>To:</b> ${esc(o.vendor_name)}${o.vendor_phone?' · '+esc(o.vendor_phone):''}<br>${esc(o.vendor_address||'')}</div>
-  <table><tr><th>#</th><th>Product</th><th>Size</th><th class="n">Pcs</th><th class="n">Rate/pc</th><th>Cloth</th><th class="n">Cloth/pc</th></tr>${rows}
-  <tr><td colspan="3" class="n"><b>Total pcs</b></td><td class="n"><b>${qn(o.items.reduce((s,i)=>s+i.qty,0))}</b></td><td colspan="3"></td></tr></table>
-  ${o.notes?`<p><b>Notes:</b> ${esc(o.notes)}</p>`:''}<p class="m">Cloth is supplied by ${FIRM}. Return all leftover cloth along with the finished goods.</p><div class="sig"><span>Vendor signature</span><span>For ${FIRM}</span></div>`);
+  <div><b>To:</b> ${esc(o.vendor_name)}${o.vendor_phone?' · '+esc(o.vendor_phone):''}<br>${esc(o.vendor_address||'')}</div>${blocks}
+  <p><b>Total pieces: ${qn(o.items.reduce((s,i)=>s+i.qty,0))}</b></p>
+  ${o.notes?`<p><b>Notes:</b> ${esc(o.notes)}</p>`:''}<p class="m">Cloth is supplied by ${FIRM}. Return all leftover cloth along with the finished goods.</p><div class="sig"><span>Tailor signature</span><span>For ${FIRM}</span></div>`);
 }
 
 // ── LOGIN ───────────────────────────────────────────────────────────────────
@@ -230,7 +279,7 @@ function Login({onLogin}){
     TOKEN=d.token;localStorage.setItem('mu_tok',d.token);localStorage.setItem('mu_refresh',d.refresh_token);localStorage.setItem('mu_user',JSON.stringify(d.user));onLogin(d.user);});};
   return h('div',{className:'login'},h('form',{className:'card',onSubmit:go},
     h('div',{className:'logo'},'MU'),
-    h('div',{style:{textAlign:'center',marginBottom:20}},h('div',{className:'b',style:{fontSize:20}},FIRM),h('div',{className:'mut sm'},'Stitching & cloth tracker')),
+    h('div',{style:{textAlign:'center',marginBottom:20}},h('div',{className:'b',style:{fontSize:20}},FIRM),h('div',{className:'mut sm'},'School uniform stitching & cloth tracker')),
     s.err&&h('div',{className:'err'},s.err),
     Fld('Email',Inp(email,setEmail,{type:'email',autoComplete:'username',required:true})),
     Fld('Password',Inp(pw,setPw,{type:'password',autoComplete:'current-password',required:true})),
@@ -247,8 +296,8 @@ function ReceiveSheet({kind,item,onClose,onDone}){
 }
 
 // ── HOME ────────────────────────────────────────────────────────────────────
-function Home({M,go,open}){
-  const[d,load]=useLoad('/dashboard',[M.v]);
+function Home({M,open}){
+  const[d]=useLoad('/dashboard',[M.v]);
   const[rcv,setRcv]=useState(null);
   if(!d)return Spin();
   return h('div',{className:'page'},
@@ -256,18 +305,21 @@ function Home({M,go,open}){
       h('div',{className:'k hero'},h('div',{className:'l'},'Average cost per piece'),h('div',{className:'v'},rs2(d.avg_cost)),
         h('div',{className:'s'},`${qn(d.pcs_made)} pcs made · total ${rs(d.total_cost)}`)),
       h('div',{className:'k'},h('div',{className:'l'},'Cloth with me'),h('div',{className:'v'},qn(d.self_stock)),h('div',{className:'s'},'metres in godown')),
-      h('div',{className:'k'},h('div',{className:'l'},'Cloth with tailors'),h('div',{className:'v'},qn(d.vendor_stock)),h('div',{className:'s'},'metres at stitch vendors')),
-      h('div',{className:'k'},h('div',{className:'l'},'Pieces pending'),h('div',{className:'v'},qn(d.pending_pcs)),h('div',{className:'s'},`of ${qn(d.ordered_pcs)} in ${d.open_orders} open orders`)),
+      h('div',{className:'k'},h('div',{className:'l'},'Cloth with tailors'),h('div',{className:'v'},qn(d.vendor_stock)),h('div',{className:'s'},'metres at tailors')),
+      h('div',{className:'k'},h('div',{className:'l'},'Pieces pending'),h('div',{className:'v'},qn(d.pending_pcs)),h('div',{className:'s'},`of ${qn(d.ordered_pcs)} in ${d.open_orders} stitch orders`)),
       h('div',{className:'k'},h('div',{className:'l'},'In transit'),h('div',{className:'v'},qn(d.transit)),h('div',{className:'s'},`m cloth · ${qn(d.goods_transit)} pcs goods`))),
     h('div',{className:'qa'},
+      h('button',{onClick:()=>open('schoolOrder')},h('b',null,'+'),'School order'),
       h('button',{onClick:()=>open('stitchOrder')},h('b',null,'+'),'Stitch order'),
       h('button',{onClick:()=>open('clothOrder')},h('b',null,'+'),'Cloth order'),
       h('button',{onClick:()=>open('despatch')},h('b',null,'↘'),'Cloth despatched'),
       h('button',{onClick:()=>open('pickOrderForDelivery')},h('b',null,'✓'),'Goods from tailor'),
-      h('button',{onClick:()=>open('transfer')},h('b',null,'⇄'),'Send / return cloth'),
-      h('button',{onClick:()=>go('more','costing')},h('b',null,'₹'),'Costing')),
-    d.overdue.length>0&&h(Fragment,null,h('div',{className:'h2'},'Overdue stitch orders'),
-      h('div',{className:'card'},d.overdue.map(o=>h('button',{key:o.id,className:'li',onClick:()=>open('stitchDetail',{id:o.id})},
+      h('button',{onClick:()=>open('transfer')},h('b',null,'⇄'),'Send / return cloth')),
+    d.to_assign.length>0&&h(Fragment,null,h('div',{className:'h2'},'School orders not yet given to a tailor'),
+      h('div',{className:'card'},d.to_assign.map(o=>h('button',{key:o.id,className:'li',onClick:()=>open('schoolDetail',{id:o.id})},
+        h('div',{className:'f1'},h('div',{className:'b'},o.school_name),h('div',{className:'mut xs'},o.number)),Tag(qn(o.left)+' pcs','warn'))))),
+    d.overdue.length>0&&h(Fragment,null,h('div',{className:'h2'},'Overdue'),
+      h('div',{className:'card'},d.overdue.map(o=>h('button',{key:o.id,className:'li',onClick:()=>open(o.kind==='school'?'schoolDetail':'stitchDetail',{id:o.id})},
         h('div',{className:'f1'},h('div',{className:'b'},o.number),h('div',{className:'mut xs'},o.vendor_name)),Tag('due '+fd(o.due_date),'bad'))))),
     h('div',{className:'h2'},'Awaiting receipt'),
     h('div',{className:'card'},d.awaiting.length?d.awaiting.map(a=>h('div',{key:a.id,className:'li'},
@@ -276,28 +328,234 @@ function Home({M,go,open}){
     rcv&&h(ReceiveSheet,{kind:rcv.kind,item:rcv,onClose:()=>setRcv(null),onDone:()=>{setRcv(null);toast('Marked received');M.bump();}}));
 }
 
-// ── CLOTH ORDER FORM ────────────────────────────────────────────────────────
-function ClothOrderForm({M,initial,onClose,onDone}){
+// ── SIZE GRID (pieces per size, optionally cloth per piece) ─────────────────
+function SizeGrid({M,itemId,sizes,onSet,withCons,hints,width}){
+  const list=sizeList(M,itemId,sizes);
+  const addOther=()=>{const s=(prompt('Size (e.g. 46 or XL)')||'').trim();if(s)onSet(s,{qty:''});};
+  if(!itemId)return h('div',{className:'sub'},'Choose the item to see its sizes.');
+  return h(Fragment,null,
+    list.length?h('table',{className:'sg'},
+      h('thead',null,h('tr',null,h('th',null,'Size'),h('th',null,'Pcs'),withCons?h('th',null,'Cloth/pc (m)'):null)),
+      h('tbody',null,list.map(sz=>{const r=sizes[sz]||{};const hint=hints&&hints[sz];
+        return h('tr',{key:sz,className:num(r.qty)>0?'has':''},h('td',null,sz,hint?h('span',{className:'hint'},hint):null),
+          h('td',null,h('input',{type:'number',inputMode:'numeric',min:0,value:r.qty??'',placeholder:'0',onChange:e=>onSet(sz,{qty:e.target.value})})),
+          withCons?h('td',null,h('input',{type:'number',inputMode:'decimal',step:'any',className:r.consEdited?'':'auto',value:r.cons??'',placeholder:String(consFor(M,itemId,sz,width)||''),onChange:e=>onSet(sz,{cons:e.target.value,consEdited:true})})):null);}))):
+      h('div',{className:'sub'},'No standard sizes for this item yet — add sizes below (or in More → Items & sizes).'),
+    h('button',{className:'btn ghost sm',style:{marginBottom:6},onClick:addOther},'+ Other size'));
+}
+const blockPcs=b=>Object.values(b.sizes).reduce((s,r)=>s+num(r.qty),0);
+const blockCloth=b=>Object.values(b.sizes).reduce((s,r)=>s+num(r.qty)*num(r.cons),0);
+
+// ── SCHOOL ORDER FORM ───────────────────────────────────────────────────────
+function SchoolOrderForm({M,initial,onClose,onDone}){
   const ed=!!initial;
-  const[f,setF]=useState(()=>initial?{...initial,items:initial.items.map(i=>({...i}))}:{date:today(),vendor_id:'',notes:'',items:[{cloth_id:'',qty:'',rate:''}]});
+  const[f,setF]=useState(()=>{
+    if(!initial)return{school_id:'',date:today(),due_date:'',ref:'',notes:'',blocks:[{k:key(),item_id:'',sizes:{}}]};
+    const blocks=groupLines(initial.items,i=>i.item_id).map(([item_id,ls])=>({k:key(),item_id,sizes:Object.fromEntries(ls.map(l=>[l.size||'',{qty:l.qty,id:l.id,given:l.stitch_ordered}]))}));
+    return{...initial,blocks};});
   const set=k=>v=>setF(x=>({...x,[k]:v}));
-  const setI=(i,k)=>v=>setF(x=>({...x,items:x.items.map((r,j)=>j===i?{...r,[k]:v}:r)}));
+  const setB=(i,patch)=>setF(x=>({...x,blocks:x.blocks.map((b,j)=>j===i?{...b,...patch}:b)}));
+  const setSize=i=>(sz,patch)=>setF(x=>({...x,blocks:x.blocks.map((b,j)=>j===i?{...b,sizes:{...b.sizes,[sz]:{...(b.sizes[sz]||{}),...patch}}}:b)}));
+  const s=useSaver(onDone);
+  const total=f.blocks.reduce((a,b)=>a+blockPcs(b),0);
+  const save=()=>s.run(()=>{const items=f.blocks.flatMap(b=>Object.entries(b.sizes).filter(([,r])=>num(r.qty)>0||r.id).map(([size,r])=>({id:r.id,item_id:b.item_id,size,qty:num(r.qty)})));
+    const body={...f,items};delete body.blocks;return ed?PUT('/school-orders/'+f.id,body):POST('/school-orders',body);});
+  return h(Sheet,{title:ed?'Edit '+f.number:'New school order',onClose,foot:h('button',{className:'btn',disabled:s.busy,onClick:save},`Save order${total?' · '+qn(total)+' pcs':''}`)},
+    s.err&&h('div',{className:'err'},s.err),
+    Fld('School',h(SelAdd,{value:f.school_id,onChange:set('school_id'),opts:schoolOpts(M,f.school_id),placeholder:'Select school',noun:'school',onAdd:addSchool(M)})),
+    h('div',{className:'g2'},Fld('Order date',DateInp(f.date,set('date'))),Fld('Deliver by',DateInp(f.due_date,set('due_date')))),
+    Fld('School PO / reference',Inp(f.ref,set('ref'))),
+    f.blocks.map((b,i)=>h('div',{key:b.k,className:'blk'},
+      f.blocks.length>1&&h('button',{className:'x',onClick:()=>setF(x=>({...x,blocks:x.blocks.filter((_,j)=>j!==i)}))},'×'),
+      Fld('Item',h(SelAdd,{value:b.item_id,onChange:v=>setB(i,{item_id:v}),opts:itemOpts(M,b.item_id),placeholder:'Select item',noun:'item',onAdd:addItem(M)})),
+      h(SizeGrid,{M,itemId:b.item_id,sizes:b.sizes,onSet:setSize(i),hints:Object.fromEntries(Object.entries(b.sizes).filter(([,r])=>r.given).map(([sz,r])=>[sz,qn(r.given)+' given']))}),
+      blockPcs(b)?h('div',{className:'sub'},qn(blockPcs(b))+' pcs'):null)),
+    h('button',{className:'btn sec blk',style:{marginBottom:12},onClick:()=>setF(x=>({...x,blocks:[...x.blocks,{k:key(),item_id:'',sizes:{}}]}))},'+ Add another item'),
+    Fld('Notes',h('textarea',{className:'in',rows:2,value:f.notes||'',onChange:e=>set('notes')(e.target.value)})),
+    ed&&h('label',{className:'chk'},h('input',{type:'checkbox',checked:!!f.closed,onChange:e=>set('closed')(e.target.checked)}),'Order closed / delivered to school'));
+}
+
+// ── SCHOOL ORDER DETAIL ─────────────────────────────────────────────────────
+function SchoolDetail({M,id,user,onClose,open}){
+  const[o]=useLoad('/school-orders/'+id,[M.v]);
+  if(!o)return h(Sheet,{title:'School order',onClose},Spin());
+  const left=o.items.reduce((a,i)=>a+Math.max(i.qty-i.stitch_ordered,0),0);
+  const del_=async()=>{if(!confirm('Delete '+o.number+'?'))return;try{await DEL('/school-orders/'+id);toast('Deleted');M.bump();onClose();}catch(e){alert(e.message);}};
+  return h(Sheet,{title:o.number,onClose,
+    foot:h(Fragment,null,h('button',{className:'btn sec',onClick:()=>open('schoolOrder',{initial:o})},'Edit'),
+      h('button',{className:'btn',disabled:!left,onClick:()=>open('stitchOrder',{schoolOrderId:id})},'Give to tailor'))},
+    h('div',{className:'card cp'},
+      h('div',{className:'row jb'},h('div',null,h('div',{className:'b'},o.school_name),h('div',{className:'mut xs'},`Ordered ${fd(o.date)}${o.due_date?' · due '+fd(o.due_date):''}${o.ref?' · ref '+o.ref:''}`)),
+        o.closed?Tag('Closed'):o.received>=o.qty?Tag('Ready','ok'):left?Tag(qn(left)+' not given','warn'):Tag('With tailors','inf')),
+      h('div',{className:'bar'},h('i',{style:{width:Math.min(100,o.qty?o.received/o.qty*100:0)+'%'}})),
+      h('div',{className:'mut xs',style:{marginTop:4}},`${qn(o.received)} of ${qn(o.qty)} pcs received from tailors · ${qn(o.stitch_ordered)} given to tailors`),
+      o.notes&&h('div',{className:'sm',style:{marginTop:8}},o.notes)),
+    groupLines(o.items,i=>i.item_name).map(([name,ls])=>h(Fragment,{key:name},h('div',{className:'h2'},name),
+      h('div',{className:'card tw'},h('table',{className:'t'},
+        h('thead',null,h('tr',null,h('th',null,'Size'),h('th',{className:'n'},'Ordered'),h('th',{className:'n'},'To tailor'),h('th',{className:'n'},'Received'))),
+        h('tbody',null,ls.map(i=>h('tr',{key:i.id},h('td',null,i.size||'—'),h('td',{className:'n'},qn(i.qty)),
+          h('td',{className:'n',style:{color:i.stitch_ordered<i.qty?'var(--warn)':undefined}},qn(i.stitch_ordered)),h('td',{className:'n'},qn(i.received))))),
+        h('tfoot',null,h('tr',null,h('td',null,'Total'),...['qty','stitch_ordered','received'].map(k=>h('td',{key:k,className:'n'},qn(ls.reduce((a,i)=>a+i[k],0)))))))))),
+    h('div',{className:'h2'},'Stitch orders'),
+    h('div',{className:'card'},o.stitch_orders.length?o.stitch_orders.map(s=>h('button',{key:s.id,className:'li',onClick:()=>open('stitchDetail',{id:s.id})},
+      h('div',{className:'f1'},h('div',{className:'sm b'},`${s.number} · ${s.vendor_name}`),h('div',{className:'mut xs'},`${fd(s.date)} · ${qn(s.qty)} pcs`)),'›')):Empty('Not given to any tailor yet')),
+    user.role==='admin'&&h('button',{className:'btn ghost blk',style:{color:'var(--bad)',marginTop:10},onClick:del_},'Delete school order'));
+}
+
+// ── STITCH ORDER FORM ───────────────────────────────────────────────────────
+function lineDefaults(M,itemId,schoolId){
+  const D=M.defaults;const d=(schoolId&&D.by_school[itemId+'|'+schoolId])||D.by_item[itemId]||{};
+  return{cloth_id:d.cloth_id||'',width:d.width||(d.cloth_id?clothOf(M,d.cloth_id).width:'')||'',rate:d.rate||itemOf(M,itemId).stitch_rate||''};
+}
+function recalcCons(M,b){
+  const sizes={};Object.entries(b.sizes).forEach(([sz,r])=>{sizes[sz]=r.consEdited?r:{...r,cons:consFor(M,b.item_id,sz,b.width)};});
+  return{...b,sizes};
+}
+function newStitchBlock(M,item_id,school_id,sizes){
+  return recalcCons(M,{k:key(),item_id:item_id||'',school_id:school_id||'',...(item_id?lineDefaults(M,item_id,school_id):{cloth_id:'',width:'',rate:''}),sizes:sizes||{}});
+}
+function StitchOrderForm({M,initial,schoolOrderId,onClose,onDone,heads}){
+  const ed=!!initial;
+  const[sos]=useLoad('/school-orders',[M.v]);
+  const[f,setF]=useState(()=>{
+    if(!initial)return{date:today(),due_date:'',vendor_id:'',notes:'',school_order_id:schoolOrderId||'',blocks:schoolOrderId?[]:[newStitchBlock(M)],charges:[]};
+    const blocks=groupLines(initial.items,i=>[i.item_id,i.school_id,i.cloth_id,i.width,i.rate].join('|')).map(([,ls])=>{const l=ls[0];
+      return{k:key(),item_id:l.item_id,school_id:l.school_id||'',cloth_id:l.cloth_id||'',width:l.width||'',rate:l.rate||'',
+        sizes:Object.fromEntries(ls.map(x=>[x.size||'',{qty:x.qty,cons:x.cons_per_pc,consEdited:x.cons_per_pc!==consFor(M,x.item_id,x.size,x.width),id:x.id,soi:x.school_order_item_id,done:x.delivered}]))};});
+    return{...initial,blocks,charges:initial.charges.map(c=>({...c}))};});
+  const set=k=>v=>setF(x=>({...x,[k]:v}));
+  const setB=(i,patch,recalc)=>setF(x=>({...x,blocks:x.blocks.map((b,j)=>{if(j!==i)return b;let n={...b,...patch};
+    if(patch.item_id!==undefined&&patch.item_id)n={...n,...lineDefaults(M,patch.item_id,n.school_id)};
+    if(patch.cloth_id!==undefined&&patch.cloth_id)n.width=clothOf(M,patch.cloth_id).width||n.width;
+    return recalc?recalcCons(M,n):n;})}));
+  const setSize=i=>(sz,patch)=>setF(x=>({...x,blocks:x.blocks.map((b,j)=>{if(j!==i)return b;
+    const r={...(b.sizes[sz]||{}),...patch};if(patch.qty!==undefined&&!r.consEdited&&(r.cons===undefined||r.cons===''))r.cons=consFor(M,b.item_id,sz,b.width);
+    return{...b,sizes:{...b.sizes,[sz]:r}};})}));
+  const setC=(i,k)=>v=>setF(x=>({...x,charges:x.charges.map((r,j)=>j===i?{...r,[k]:v}:r)}));
+  // fill from the school order: what it still needs beyond what tailors already have
+  const fillFromSchool=soId=>{const so=sos&&sos.find(x=>x.id===soId);if(!so)return;
+    const mine={};f.blocks.forEach(b=>Object.values(b.sizes).forEach(r=>{if(r.soi&&r.id)mine[r.soi]=num(r.qty);}));
+    const blocks=groupLines(so.items,i=>i.item_id).map(([item_id,ls])=>{const sizes={};
+      ls.forEach(l=>{const bal=l.qty-l.stitch_ordered+(mine[l.id]||0);if(bal>0)sizes[l.size||'']={qty:bal,soi:l.id};});
+      return Object.keys(sizes).length?newStitchBlock(M,item_id,so.school_id,sizes):null;}).filter(Boolean);
+    setF(x=>({...x,school_order_id:soId,blocks:blocks.length?blocks:x.blocks}));
+    if(!blocks.length)toast('Everything in this school order is already with tailors');};
+  useEffect(()=>{if(sos&&schoolOrderId&&!ed&&!f.blocks.length)fillFromSchool(schoolOrderId);},[sos]);
+  const s=useSaver(onDone);
+  const save=()=>s.run(async()=>{const items=f.blocks.flatMap(b=>Object.entries(b.sizes).filter(([,r])=>num(r.qty)>0||r.id).map(([size,r])=>({
+      id:r.id,item_id:b.item_id,school_id:b.school_id,school_order_item_id:r.soi,size,qty:num(r.qty),rate:b.rate,cloth_id:b.cloth_id,width:b.width,cons_per_pc:num(r.cons)})));
+    const body={...f,items};delete body.blocks;
+    return ed?(await PUT('/stitch-orders/'+f.id,body),{id:f.id}):POST('/stitch-orders',body);});
+  const need={};f.blocks.forEach(b=>{if(b.cloth_id)need[b.cloth_id]=(need[b.cloth_id]||0)+blockCloth(b);});
+  const pcs=f.blocks.reduce((a,b)=>a+blockPcs(b),0),stitch=f.blocks.reduce((a,b)=>a+blockPcs(b)*num(b.rate),0);
+  const so=sos&&sos.find(x=>x.id===f.school_order_id);
+  return h(Sheet,{title:ed?'Edit '+f.number:'New stitch order',onClose,foot:h('button',{className:'btn',disabled:s.busy,onClick:save},`Save order${pcs?' · '+qn(pcs)+' pcs':''}`)},
+    s.err&&h('div',{className:'err'},s.err),
+    Fld('Tailor',h(SelAdd,{value:f.vendor_id,onChange:set('vendor_id'),opts:vendorOpts(M,['stitch','both']),placeholder:'Select tailor',noun:'tailor',onAdd:addVendor(M,'stitch')})),
+    h('div',{className:'g2'},Fld('Order date',DateInp(f.date,set('date'))),Fld('Deliver by',DateInp(f.due_date,set('due_date')))),
+    Fld('For school order (optional)',Sel(f.school_order_id,v=>{if(v&&!ed&&(!f.blocks.length||(f.blocks.length===1&&!f.blocks[0].item_id)))fillFromSchool(v);else set('school_order_id')(v);},
+      (sos||[]).filter(o=>!o.closed||o.id===f.school_order_id).map(o=>({value:o.id,label:`${o.number} · ${o.school_name}`})),'— none —'),
+      so&&!ed?h('button',{className:'btn ghost sm',style:{padding:'4px 0'},onClick:e=>{e.preventDefault();fillFromSchool(so.id);}},'Fill with sizes not yet given to a tailor'):null),
+    f.blocks.map((b,i)=>h('div',{key:b.k,className:'blk'},
+      h('button',{className:'x',onClick:()=>setF(x=>({...x,blocks:x.blocks.filter((_,j)=>j!==i)}))},'×'),
+      h('div',{className:'g2'},
+        Fld('Item',h(SelAdd,{value:b.item_id,onChange:v=>setB(i,{item_id:v},true),opts:itemOpts(M,b.item_id),placeholder:'Select item',noun:'item',onAdd:addItem(M)})),
+        Fld('School',h(SelAdd,{value:b.school_id,onChange:v=>setB(i,{school_id:v}),opts:schoolOpts(M,b.school_id),placeholder:'—',noun:'school',onAdd:addSchool(M)}))),
+      Fld('Cloth',h(SelAdd,{value:b.cloth_id,onChange:v=>setB(i,{cloth_id:v},true),opts:clothOpts(M,b.cloth_id),placeholder:'Select cloth',noun:'cloth',onAdd:addCloth(M)})),
+      h('div',{className:'g2'},Fld('Cloth width (inch)',NumInp(b.width,v=>setB(i,{width:v},true)),itemOf(M,b.item_id).base_width?`chart is for ${qn(itemOf(M,b.item_id).base_width)}"`:null),
+        Fld('Stitching ₹/pc',NumInp(b.rate,v=>setB(i,{rate:v})))),
+      h(SizeGrid,{M,itemId:b.item_id,sizes:b.sizes,onSet:setSize(i),withCons:true,width:b.width,
+        hints:Object.fromEntries(Object.entries(b.sizes).filter(([,r])=>r.done).map(([sz,r])=>[sz,qn(r.done)+' recd']))}),
+      blockPcs(b)?h('div',{className:'sub'},`${qn(blockPcs(b))} pcs · ${qn(blockCloth(b))} m cloth${num(b.rate)?' · '+rs(blockPcs(b)*num(b.rate)):''}`):null)),
+    h('button',{className:'btn sec blk',style:{marginBottom:12},onClick:()=>setF(x=>({...x,blocks:[...x.blocks,newStitchBlock(M,'',x.blocks.length?x.blocks[x.blocks.length-1].school_id:'')]}))},'+ Add another item'),
+    pcs>0&&h('div',{className:'sum'},h('div',{className:'b'},`Material required`),
+      Object.keys(need).length?Object.entries(need).map(([c,q])=>h('div',{key:c},`${clothOf(M,c).name}: ${qn(q)} m`)):h('div',null,'Choose cloth for each item to see metres needed'),
+      h('div',{style:{marginTop:4}},`${qn(pcs)} pcs${stitch?' · stitching '+rs(stitch):''}`)),
+    h('div',{className:'h2'},'Other charges (optional)'),
+    h('div',{className:'note',style:{paddingTop:0}},'Transport, buttons, labels etc. — spread over the pieces of this order in costing.'),
+    f.charges.map((c,i)=>h('div',{key:i,className:'line'},
+      h('button',{className:'x',onClick:()=>setF(x=>({...x,charges:x.charges.filter((_,j)=>j!==i)}))},'×'),
+      h('div',{className:'g2'},Fld('Head',Sel(c.head,setC(i,'head'),heads.map(x=>({value:x,label:x})))),Fld('Amount ₹',NumInp(c.amount,setC(i,'amount')))),
+      h('div',{className:'g2'},Fld('Date',DateInp(c.date,setC(i,'date'))),Fld('Note',Inp(c.notes,setC(i,'notes')))))),
+    h('button',{className:'btn sec blk',style:{marginBottom:12},onClick:()=>setF(x=>({...x,charges:[...x.charges,{head:heads[0],amount:'',date:today(),notes:''}]}))},'+ Add charge'),
+    Fld('Notes',h('textarea',{className:'in',rows:2,value:f.notes||'',onChange:e=>set('notes')(e.target.value)})),
+    ed&&h('label',{className:'chk'},h('input',{type:'checkbox',checked:!!f.closed,onChange:e=>set('closed')(e.target.checked)}),'Order closed'));
+}
+
+// ── MATERIAL REQUIRED (shown after saving a stitch order, and from its detail) ──
+function RequirementTable({req}){
+  return req.length?h('div',{className:'card tw'},h('table',{className:'t'},
+    h('thead',null,h('tr',null,h('th',null,'Cloth'),h('th',{className:'n'},'Need'),h('th',{className:'n'},'At tailor'),h('th',{className:'n'},'On order'),h('th',{className:'n'},'Short'))),
+    h('tbody',null,req.map(r=>h('tr',{key:r.cloth_id},h('td',null,r.cloth_name,r.in_godown>0?h('div',{className:'xs mut'},`${qn(r.in_godown)} ${r.unit} in your godown`):null),
+      h('td',{className:'n'},qn(r.required)),h('td',{className:'n'},qn(r.at_tailor)),h('td',{className:'n'},qn(r.on_order)),
+      h('td',{className:'n b',style:{color:r.short>0?'var(--bad)':'var(--ok)'}},r.short>0?qn(r.short):'✓'))))))
+  :Empty('No cloth set on this order');
+}
+function MaterialSheet({M,id,onClose,open}){
+  const[o,load]=useLoad('/stitch-orders/'+id,[M.v]);
+  const[cos]=useLoad('/cloth-orders',[M.v]);const[pick,setPick]=useState(false);
+  if(!o)return h(Sheet,{title:'Material required',onClose},Spin());
+  const short=o.requirement.filter(r=>r.short>0);
+  const link=async coId=>{try{await POST(`/cloth-orders/${coId}/links`,{stitch_order_id:id});toast('Linked');setPick(false);M.bump();}catch(e){alert(e.message);}};
+  const linkedIds=o.cloth_orders.map(c=>c.id);
+  return h(Sheet,{title:'Material required · '+o.number,onClose,foot:h('button',{className:'btn sec',onClick:onClose},'Done')},
+    h('div',{className:'note'},`Cloth for ${o.vendor_name}'s order. "At tailor" is cloth already with (or on the way to) this tailor; "On order" is still to come on linked cloth orders.`),
+    h(RequirementTable,{req:o.requirement}),
+    o.cloth_orders.length>0&&h(Fragment,null,h('div',{className:'h2'},'Linked cloth orders'),h('div',{className:'card'},o.cloth_orders.map(c=>h('button',{key:c.id,className:'li',onClick:()=>open('clothDetail',{id:c.id})},
+      h('div',{className:'f1'},h('div',{className:'sm b'},c.number+' · '+c.vendor_name),h('div',{className:'mut xs'},fd(c.date))),'›')))),
+    short.length>0&&h('button',{className:'btn blk',style:{marginBottom:8},onClick:()=>open('clothOrder',{prefill:{stitch_order_ids:[id],items:short.map(r=>({cloth_id:r.cloth_id,qty:Math.ceil(r.short),rate:'',width:clothOf(M,r.cloth_id).width||''}))}})},'Create cloth order for the shortfall'),
+    h('button',{className:'btn sec blk',style:{marginBottom:8},onClick:()=>setPick(!pick)},'Link to an existing cloth order'),
+    pick&&h('div',{className:'card'},(cos||[]).filter(c=>!c.closed&&!linkedIds.includes(c.id)).length?(cos||[]).filter(c=>!c.closed&&!linkedIds.includes(c.id)).map(c=>h('button',{key:c.id,className:'li',onClick:()=>link(c.id)},
+      h('div',{className:'f1'},h('div',{className:'sm b'},c.number+' · '+c.vendor_name),h('div',{className:'mut xs'},c.items.map(i=>`${i.cloth_name} ${qn(i.qty)}${i.unit}`).join(', '))),'Link')):Empty('No open cloth orders')),
+    short.length>0&&h('div',{className:'note'},'Cloth in your godown can be sent to the tailor from Cloth → Moves.'));
+}
+
+// ── CLOTH ORDER FORM ────────────────────────────────────────────────────────
+function ClothOrderForm({M,initial,prefill,onClose,onDone}){
+  const ed=!!initial;
+  const blank={cloth_id:'',qty:'',rate:'',amount:'',width:''};
+  const[f,setF]=useState(()=>{const b=initial?{...initial,items:initial.items.map(i=>({...i,amount:r2(i.qty*i.rate)})),stitch_order_ids:initial.stitch_orders.map(s=>s.id)}
+    :{date:today(),vendor_id:'',notes:'',items:[{...blank}],stitch_order_ids:[]};
+    if(prefill){b.stitch_order_ids=prefill.stitch_order_ids||b.stitch_order_ids;if(prefill.items)b.items=prefill.items.map(x=>({...blank,...x}));}return b;});
+  const[sos]=useLoad('/stitch-orders',[M.v]);
+  const[req,setReq]=useState([]);
+  useEffect(()=>{if(!f.stitch_order_ids.length){setReq([]);return;}GET('/requirement?stitch_order_ids='+f.stitch_order_ids.join(',')).then(setReq);},[f.stitch_order_ids.join(',')]);
+  const set=k=>v=>setF(x=>({...x,[k]:v}));
+  // rate and amount stay in step: typing one works out the other
+  const setI=(i,k)=>v=>setF(x=>({...x,items:x.items.map((r,j)=>{if(j!==i)return r;const n={...r,[k]:v};
+    if(k==='cloth_id'&&v)n.width=clothOf(M,v).width||n.width;
+    if(k==='qty'||k==='rate')n.amount=num(n.qty)&&num(n.rate)?r2(num(n.qty)*num(n.rate)):n.amount;
+    if(k==='amount')n.rate=num(n.qty)?r2(num(v)/num(n.qty)):n.rate;return n;})}));
+  const toggle=sid=>setF(x=>({...x,stitch_order_ids:x.stitch_order_ids.includes(sid)?x.stitch_order_ids.filter(y=>y!==sid):[...x.stitch_order_ids,sid]}));
+  const fill=()=>setF(x=>{const items=[...x.items.filter(i=>i.cloth_id)];
+    req.forEach(r=>{const want=Math.ceil(Math.max(r.required-r.at_tailor,0));if(!want)return;const ex=items.find(i=>i.cloth_id===r.cloth_id);
+      if(ex){ex.qty=want;ex.amount=num(ex.rate)?r2(want*num(ex.rate)):ex.amount;}else items.push({...blank,cloth_id:r.cloth_id,qty:want,width:clothOf(M,r.cloth_id).width||''});});
+    return{...x,items:items.length?items:[{...blank}]};});
   const tot=f.items.reduce((s,i)=>s+num(i.qty)*num(i.rate),0);
   const s=useSaver(onDone);
   const save=()=>s.run(()=>ed?PUT('/cloth-orders/'+f.id,f):POST('/cloth-orders',f));
-  const vo=vendorOpts(M,['cloth','both']);
+  const ordering=c=>f.items.filter(i=>i.cloth_id===c).reduce((a,i)=>a+num(i.qty),0);
+  const soList=(sos||[]).filter(o=>!o.closed||f.stitch_order_ids.includes(o.id));
   return h(Sheet,{title:ed?'Edit '+f.number:'New cloth order',onClose,foot:h('button',{className:'btn',disabled:s.busy,onClick:save},'Save order')},
     s.err&&h('div',{className:'err'},s.err),
-    !vo.length&&h('div',{className:'err'},'Add a cloth vendor first (More → Vendors).'),
-    Fld('Cloth vendor',Sel(f.vendor_id,set('vendor_id'),vo,'Select vendor')),
+    Fld('Cloth vendor',h(SelAdd,{value:f.vendor_id,onChange:set('vendor_id'),opts:vendorOpts(M,['cloth','both']),placeholder:'Select vendor',noun:'cloth vendor',onAdd:addVendor(M,'cloth')})),
     Fld('Order date',DateInp(f.date,set('date'))),
+    h('div',{className:'h2'},'For stitch orders'),
+    h('div',{className:'card'},!sos?Spin():soList.length?soList.map(o=>h('label',{key:o.id,className:'li',style:{cursor:'pointer'}},
+      h('input',{type:'checkbox',checked:f.stitch_order_ids.includes(o.id),onChange:()=>toggle(o.id),style:{width:20,height:20}}),
+      h('div',{className:'f1'},h('div',{className:'sm b'},`${o.number} · ${o.vendor_name}`),h('div',{className:'mut xs ell'},`${fd(o.date)} · ${qn(o.qty)} pcs${o.schools?' · '+o.schools:''}`)))):Empty('No open stitch orders')),
+    req.length>0&&h('div',{className:'card tw'},h('table',{className:'t'},
+      h('thead',null,h('tr',null,h('th',null,'Cloth'),h('th',{className:'n'},'Need'),h('th',{className:'n'},'At tailor'),h('th',{className:'n'},'Ordering'),h('th',{className:'n'},'Extra'))),
+      h('tbody',null,req.map(r=>{const o=ordering(r.cloth_id),x=o-(r.required-r.at_tailor);return h('tr',{key:r.cloth_id},h('td',null,r.cloth_name),h('td',{className:'n'},qn(r.required)),h('td',{className:'n'},qn(r.at_tailor)),h('td',{className:'n'},qn(o)),
+        h('td',{className:'n b',style:{color:x<0?'var(--bad)':undefined}},x<0?'short '+qn(-x):qn(x)));}))),
+      h('div',{className:'cp',style:{paddingTop:6}},h('button',{className:'btn sec sm',onClick:fill},'Fill quantities from requirement'),h('div',{className:'mut xs',style:{marginTop:6}},'Extra = what the vendor\'s MOQ adds beyond the need; it stays in stock.'))),
     h('div',{className:'h2'},'Cloth'),
     f.items.map((it,i)=>h('div',{key:i,className:'line'},
       f.items.length>1&&h('button',{className:'x',onClick:()=>setF(x=>({...x,items:x.items.filter((_,j)=>j!==i)}))},'×'),
-      Fld('Cloth',Sel(it.cloth_id,setI(i,'cloth_id'),clothOpts(M),'Select cloth')),
-      h('div',{className:'g2'},Fld(`Qty (${clothOf(M,it.cloth_id).unit||'m'})`,NumInp(it.qty,setI(i,'qty'))),Fld('Rate ₹',NumInp(it.rate,setI(i,'rate')))),
-      it.qty&&it.rate?h('div',{className:'xs mut',style:{margin:'-4px 0 10px'}},'Amount '+rs2(num(it.qty)*num(it.rate))):null)),
-    h('button',{className:'btn sec blk',style:{marginBottom:12},onClick:()=>setF(x=>({...x,items:[...x.items,{cloth_id:'',qty:'',rate:''}]}))},'+ Add cloth'),
+      Fld('Cloth',h(SelAdd,{value:it.cloth_id,onChange:setI(i,'cloth_id'),opts:clothOpts(M,it.cloth_id),placeholder:'Select cloth',noun:'cloth',onAdd:addCloth(M)})),
+      h('div',{className:'g2'},Fld(`Qty (${clothOf(M,it.cloth_id).unit||'m'})`,NumInp(it.qty,setI(i,'qty'))),Fld('Width (inch)',NumInp(it.width,setI(i,'width')))),
+      h('div',{className:'g2'},Fld('Rate ₹',NumInp(it.rate,setI(i,'rate'))),Fld('or total ₹',NumInp(it.amount,setI(i,'amount')))))),
+    h('button',{className:'btn sec blk',style:{marginBottom:12},onClick:()=>setF(x=>({...x,items:[...x.items,{...blank}]}))},'+ Add cloth'),
     h('div',{className:'sum'},'Order value: ',h('b',null,rs2(tot))),
     Fld('Notes',h('textarea',{className:'in',rows:2,value:f.notes||'',onChange:e=>set('notes')(e.target.value)}),'MOQ, delivery terms etc.'),
     ed&&h('label',{className:'chk'},h('input',{type:'checkbox',checked:!!f.closed,onChange:e=>set('closed')(e.target.checked)}),'Order closed (no more despatch expected)'));
@@ -307,33 +565,36 @@ function ClothOrderForm({M,initial,onClose,onDone}){
 function DespatchForm({M,initial,orderId,onClose,onDone}){
   const ed=!!(initial&&initial.id);
   const[orders]=useLoad('/cloth-orders');
-  const[f,setF]=useState(()=>initial?{...initial}:{order_id:orderId||'',vendor_id:'',cloth_id:'',qty:'',rate:'',freight:'',challan_no:'',dest:'',despatch_date:today(),received_date:'',notes:''});
+  const[f,setF]=useState(()=>initial?{...initial,by:'amount'}:{order_id:orderId||'',vendor_id:'',cloth_id:'',qty:'',rate:'',amount:'',by:'rate',freight:'',challan_no:'',dest:'',despatch_date:today(),received_date:'',notes:''});
   const set=k=>v=>setF(x=>({...x,[k]:v}));
   const ord=orders&&orders.find(o=>o.id===f.order_id);
-  // picking an order line pre-fills the cloth and its ordered rate
   useEffect(()=>{if(ord&&!ed){const line=ord.items.find(i=>i.cloth_id===f.cloth_id)||(ord.items.length===1?ord.items[0]:null);
     if(line)setF(x=>({...x,cloth_id:line.cloth_id,rate:x.rate||line.rate,qty:x.qty||Math.max(line.qty-line.despatched,0)||''}));}},[f.order_id,orders]);
   const pickCloth=v=>{const line=ord&&ord.items.find(i=>i.cloth_id===v);setF(x=>({...x,cloth_id:v,rate:line?line.rate:x.rate}));};
+  const amt=f.by==='amount'?num(f.amount):num(f.qty)*num(f.rate);
+  const rate=f.by==='amount'?(num(f.qty)?num(f.amount)/num(f.qty):0):num(f.rate);
   const s=useSaver(onDone);
-  const save=()=>s.run(()=>ed?PUT('/cloth-despatches/'+f.id,f):POST('/cloth-despatches',f));
-  const amt=num(f.qty)*num(f.rate);
-  const cOpts=ord?ord.items.map(i=>({value:i.cloth_id,label:`${i.cloth_name} — pending ${qn(i.qty-i.despatched)} ${i.unit}`})):clothOpts(M);
+  const save=()=>s.run(()=>{const b={...f,amount:f.by==='amount'?f.amount:'',rate:f.by==='amount'?'':f.rate};return ed?PUT('/cloth-despatches/'+f.id,b):POST('/cloth-despatches',b);});
+  const cOpts=ord?ord.items.map(i=>({value:i.cloth_id,label:`${i.cloth_name} — pending ${qn(i.qty-i.despatched)} ${i.unit}`})):clothOpts(M,f.cloth_id);
   if(!orders)return h(Sheet,{title:'Cloth despatch',onClose},Spin());
   return h(Sheet,{title:ed?'Edit '+f.number:'Cloth despatched by vendor',onClose,foot:h('button',{className:'btn',disabled:s.busy,onClick:save},'Save')},
     s.err&&h('div',{className:'err'},s.err),
     Fld('Against cloth order',Sel(f.order_id,set('order_id'),orders.filter(o=>!o.closed||o.id===f.order_id).map(o=>({value:o.id,label:`${o.number} · ${o.vendor_name}`})),'— No order (direct purchase) —')),
     !f.order_id&&Fld('Cloth vendor',Sel(f.vendor_id,set('vendor_id'),vendorOpts(M,['cloth','both']),'Select vendor')),
     Fld('Cloth',Sel(f.cloth_id,pickCloth,cOpts,'Select cloth')),
-    h('div',{className:'g2'},Fld(`Qty despatched (${clothOf(M,f.cloth_id).unit||'m'})`,NumInp(f.qty,set('qty'))),Fld('Rate ₹',NumInp(f.rate,set('rate')))),
+    Fld(`Qty despatched (${clothOf(M,f.cloth_id).unit||'m'})`,NumInp(f.qty,set('qty'))),
+    h('div',{className:'seg'},h('button',{className:f.by==='rate'?'on':'',onClick:()=>setF(x=>({...x,by:'rate',rate:x.rate||(rate?r2(rate):'')}))},'Enter rate'),
+      h('button',{className:f.by==='amount'?'on':'',onClick:()=>setF(x=>({...x,by:'amount',amount:x.amount||(amt?r2(amt):'')}))},'Enter total bill')),
+    f.by==='rate'?Fld('Rate ₹ per '+(clothOf(M,f.cloth_id).unit||'m'),NumInp(f.rate,set('rate'))):Fld('Total bill amount ₹',NumInp(f.amount,set('amount')),'Enter the bill value; the rate is worked out.'),
     h('div',{className:'g2'},Fld('Freight ₹',NumInp(f.freight,set('freight'))),Fld('Challan / bill no.',Inp(f.challan_no,set('challan_no')))),
-    h('div',{className:'sum'},'Amount ',h('b',null,rs2(amt)),num(f.freight)?h(Fragment,null,' + freight = ',h('b',null,rs2(amt+num(f.freight)))):null),
+    h('div',{className:'sum'},'Amount ',h('b',null,rs2(amt)),rate?` (${rs2(rate)}/${clothOf(M,f.cloth_id).unit||'m'})`:'',num(f.freight)?h(Fragment,null,' + freight = ',h('b',null,rs2(amt+num(f.freight)))):null),
     Fld('Sent to',Sel(f.dest,set('dest'),locOpts(M),'Where did the cloth go?'),'Choose the tailor if the vendor sent cloth straight to him.'),
     h('div',{className:'g2'},Fld('Despatch date',DateInp(f.despatch_date,set('despatch_date'))),Fld('Received date',DateInp(f.received_date,set('received_date')))),
     h('div',{className:'note'},'Leave "Received date" empty while the cloth is on the way.'),
     Fld('Notes',Inp(f.notes,set('notes'))));
 }
 
-// ── CLOTH TRANSFER FORM (send cloth to tailor / take back leftover) ─────────
+// ── CLOTH TRANSFER FORM ─────────────────────────────────────────────────────
 function TransferForm({M,initial,onClose,onDone}){
   const ed=!!(initial&&initial.id);
   const[st]=useLoad('/stock');
@@ -353,53 +614,11 @@ function TransferForm({M,initial,onClose,onDone}){
       h('button',{className:f.from_loc!=='self'&&f.to_loc!=='self'?'on':'',onClick:()=>setF(x=>({...x,from_loc:x.from_loc==='self'?'':x.from_loc,to_loc:x.to_loc==='self'?'':x.to_loc}))},'Tailor → tailor')),
     Fld('From',Sel(f.from_loc,set('from_loc'),locOpts(M),'Select')),
     Fld('To',Sel(f.to_loc,set('to_loc'),locOpts(M),'Select')),
-    Fld('Cloth',Sel(f.cloth_id,set('cloth_id'),clothOpts(M),'Select cloth'),st&&f.cloth_id&&f.from_loc?`Available at ${locName(M,f.from_loc)}: ${qn(avail)} ${clothOf(M,f.cloth_id).unit||'m'}`:null),
+    Fld('Cloth',Sel(f.cloth_id,set('cloth_id'),clothOpts(M,f.cloth_id),'Select cloth'),st&&f.cloth_id&&f.from_loc?`Available at ${locName(M,f.from_loc)}: ${qn(avail)} ${clothOf(M,f.cloth_id).unit||'m'}`:null),
     Fld(`Quantity (${clothOf(M,f.cloth_id).unit||'m'})`,NumInp(f.qty,set('qty'))),
     soOpts.length>0&&Fld('For stitch order (optional)',Sel(f.stitch_order_id,set('stitch_order_id'),soOpts,'— none —')),
     h('div',{className:'g2'},Fld('Despatch date',DateInp(f.despatch_date,set('despatch_date'))),Fld('Received date',DateInp(f.received_date,set('received_date')))),
     Fld('Notes',Inp(f.notes,set('notes'))));
-}
-
-// ── STITCH ORDER FORM ───────────────────────────────────────────────────────
-function StitchOrderForm({M,initial,onClose,onDone,heads}){
-  const ed=!!initial;
-  const blank={product_id:'',size:'',qty:'',rate:'',cloth_id:'',cons_per_pc:''};
-  const[f,setF]=useState(()=>initial?{...initial,items:initial.items.map(i=>({...i})),charges:initial.charges.map(c=>({...c}))}
-    :{date:today(),due_date:'',vendor_id:'',notes:'',items:[{...blank}],charges:[]});
-  const set=k=>v=>setF(x=>({...x,[k]:v}));
-  const setI=(i,k)=>v=>setF(x=>({...x,items:x.items.map((r,j)=>{if(j!==i)return r;const n={...r,[k]:v};
-    if(k==='product_id'){const p=M.products.find(p=>p.id===v);if(p){n.rate=p.stitch_rate||r.rate;n.cloth_id=p.cloth_id||r.cloth_id;n.cons_per_pc=p.cons_per_pc||r.cons_per_pc;}}return n;})}));
-  const setC=(i,k)=>v=>setF(x=>({...x,charges:x.charges.map((r,j)=>j===i?{...r,[k]:v}:r)}));
-  const s=useSaver(onDone);
-  const save=()=>s.run(()=>ed?PUT('/stitch-orders/'+f.id,f):POST('/stitch-orders',f));
-  const need={};f.items.forEach(i=>{if(i.cloth_id)need[i.cloth_id]=(need[i.cloth_id]||0)+num(i.qty)*num(i.cons_per_pc);});
-  const pcs=f.items.reduce((a,i)=>a+num(i.qty),0),stitch=f.items.reduce((a,i)=>a+num(i.qty)*num(i.rate),0);
-  const vo=vendorOpts(M,['stitch','both']);
-  const pOpts=M.products.filter(p=>p.active||f.items.some(i=>i.product_id===p.id)).map(p=>({value:p.id,label:p.name+(p.school?' · '+p.school:'')}));
-  return h(Sheet,{title:ed?'Edit '+f.number:'New stitch order',onClose,foot:h('button',{className:'btn',disabled:s.busy,onClick:save},'Save order')},
-    s.err&&h('div',{className:'err'},s.err),
-    !vo.length&&h('div',{className:'err'},'Add a stitching vendor first (More → Vendors).'),
-    !M.products.length&&h('div',{className:'err'},'Add products first (More → Products).'),
-    Fld('Stitching vendor (tailor)',Sel(f.vendor_id,set('vendor_id'),vo,'Select vendor')),
-    h('div',{className:'g2'},Fld('Order date',DateInp(f.date,set('date'))),Fld('Deliver by',DateInp(f.due_date,set('due_date')))),
-    h('div',{className:'h2'},'Products'),
-    f.items.map((it,i)=>h('div',{key:it.id||i,className:'line'},
-      f.items.length>1&&h('button',{className:'x',onClick:()=>setF(x=>({...x,items:x.items.filter((_,j)=>j!==i)}))},'×'),
-      Fld('Product',Sel(it.product_id,setI(i,'product_id'),pOpts,'Select product')),
-      h('div',{className:'g3'},Fld('Size',Inp(it.size,setI(i,'size'),{placeholder:'e.g. 32'})),Fld('Pieces',NumInp(it.qty,setI(i,'qty'),{inputMode:'numeric'})),Fld('Rate/pc ₹',NumInp(it.rate,setI(i,'rate')))),
-      h('div',{className:'g2'},Fld('Cloth used',Sel(it.cloth_id,setI(i,'cloth_id'),clothOpts(M),'—')),Fld(`Cloth per pc (${clothOf(M,it.cloth_id).unit||'m'})`,NumInp(it.cons_per_pc,setI(i,'cons_per_pc')))))),
-    h('button',{className:'btn sec blk',style:{marginBottom:12},onClick:()=>setF(x=>({...x,items:[...x.items,{...blank,product_id:x.items[x.items.length-1].product_id}]}))},'+ Add line'),
-    h('div',{className:'sum'},h('div',null,`${qn(pcs)} pcs · stitching ${rs2(stitch)}`),
-      Object.keys(need).length?h('div',null,'Cloth needed: ',Object.entries(need).map(([c,q])=>`${clothOf(M,c).name} ${qn(q)} ${clothOf(M,c).unit||'m'}`).join(', ')):null),
-    h('div',{className:'h2'},'Other charges (optional)'),
-    h('div',{className:'note',style:{paddingTop:0}},'Transport, buttons, labels etc. — spread over the pieces of this order in costing.'),
-    f.charges.map((c,i)=>h('div',{key:i,className:'line'},
-      h('button',{className:'x',onClick:()=>setF(x=>({...x,charges:x.charges.filter((_,j)=>j!==i)}))},'×'),
-      h('div',{className:'g2'},Fld('Head',Sel(c.head,setC(i,'head'),heads.map(x=>({value:x,label:x})))),Fld('Amount ₹',NumInp(c.amount,setC(i,'amount')))),
-      h('div',{className:'g2'},Fld('Date',DateInp(c.date,setC(i,'date'))),Fld('Note',Inp(c.notes,setC(i,'notes')))))),
-    h('button',{className:'btn sec blk',style:{marginBottom:12},onClick:()=>setF(x=>({...x,charges:[...x.charges,{head:heads[0],amount:'',date:today(),notes:''}]}))},'+ Add charge'),
-    Fld('Notes',h('textarea',{className:'in',rows:2,value:f.notes||'',onChange:e=>set('notes')(e.target.value)})),
-    ed&&h('label',{className:'chk'},h('input',{type:'checkbox',checked:!!f.closed,onChange:e=>set('closed')(e.target.checked)}),'Order closed'));
 }
 
 // ── DELIVERY FORM (goods despatched by tailor, with leftover cloth) ─────────
@@ -420,20 +639,25 @@ function DeliveryForm({M,orderId,initial,onClose,onDone}){
     if(k==='qty'&&r._auto){const oi=o.items[i];n.cloth_used=oi.cons_per_pc?+(num(v)*oi.cons_per_pc).toFixed(3):'';}
     if(k==='cloth_used')n._auto=false;return n;})}));
   const setR=(i,k)=>v=>setF(x=>({...x,returns:x.returns.map((r,j)=>j===i?{...r,[k]:v}:r)}));
+  const allPending=()=>setF(x=>({...x,items:x.items.map((r,i)=>{const oi=o.items[i];const prev=ed?num((initial.items.find(y=>y.order_item_id===oi.id)||{}).qty):0;
+    const pend=Math.max(oi.qty-oi.delivered+prev,0);return{...r,qty:pend||'',cloth_used:r._auto&&oi.cons_per_pc?+(pend*oi.cons_per_pc).toFixed(3):r.cloth_used};})}));
   const save=()=>s.run(()=>ed?PUT('/stitch-deliveries/'+f.id,f):POST('/stitch-deliveries',f));
   const vstock=st&&st.locations.find(l=>l.loc===o.vendor_id);
   const cloths=[...new Set([...o.items.map(i=>i.cloth_id).filter(Boolean),...(vstock?vstock.lines.map(l=>l.cloth_id):[])])];
-  return h(Sheet,{title:ed?'Edit '+f.number:'Goods from '+o.vendor_name,onClose,foot:h('button',{className:'btn',disabled:s.busy,onClick:save},'Save')},
+  const pcs=f.items.reduce((a,i)=>a+num(i.qty),0);
+  return h(Sheet,{title:ed?'Edit '+f.number:'Goods from '+o.vendor_name,onClose,foot:h('button',{className:'btn',disabled:s.busy,onClick:save},`Save${pcs?' · '+qn(pcs)+' pcs':''}`)},
     s.err&&h('div',{className:'err'},s.err),
-    h('div',{className:'card cp sm'},h('b',null,o.number),' · ',o.vendor_name,h('div',{className:'mut xs'},'Order date '+fd(o.date))),
+    h('div',{className:'card cp sm'},h('b',null,o.number),' · ',o.vendor_name,h('div',{className:'mut xs'},'Order date '+fd(o.date)+(o.schools?' · '+o.schools:''))),
     h('div',{className:'g2'},Fld('Tailor despatched on',DateInp(f.despatch_date,set('despatch_date'))),Fld('Received by me on',DateInp(f.received_date,set('received_date')))),
     Fld('Challan no.',Inp(f.challan_no,set('challan_no'))),
-    h('div',{className:'h2'},'Pieces received'),
-    o.items.map((oi,i)=>{const pend=oi.qty-oi.delivered+(ed?num((initial.items.find(x=>x.order_item_id===oi.id)||{}).qty):0);
-      return h('div',{key:oi.id,className:'line'},
-        h('div',{className:'sm b',style:{marginBottom:6}},oi.product_name,oi.size?' · Size '+oi.size:'',h('span',{className:'mut xs'},`  (pending ${qn(pend)} of ${qn(oi.qty)})`)),
-        h('div',{className:'g2'},Fld('Pieces',NumInp(f.items[i].qty,setI(i,'qty'),{inputMode:'numeric',placeholder:'0'})),
-          Fld(`Cloth used (${oi.unit||'m'})`,NumInp(f.items[i].cloth_used,setI(i,'cloth_used')),oi.cons_per_pc?`std ${qn(oi.cons_per_pc)}/pc`:null)));}),
+    h('div',{className:'row jb'},h('div',{className:'h2'},'Pieces received'),h('button',{className:'btn ghost sm',onClick:allPending},'All pending')),
+    groupLines(o.items.map((oi,i)=>({oi,i})),x=>[x.oi.school_name||'',x.oi.item_name].join(' · ')).map(([title,ls])=>h('div',{key:title,className:'blk'},
+      h('div',{className:'blk-h'},title.replace(/^ · /,'')),
+      h('table',{className:'sg'},h('thead',null,h('tr',null,h('th',null,'Size'),h('th',null,'Pcs'),h('th',null,'Cloth used'))),
+        h('tbody',null,ls.map(({oi,i})=>{const pend=oi.qty-oi.delivered+(ed?num((initial.items.find(x=>x.order_item_id===oi.id)||{}).qty):0);
+          return h('tr',{key:oi.id,className:num(f.items[i].qty)>0?'has':''},h('td',null,oi.size||'—',h('span',{className:'hint'},`pend ${qn(pend)}`)),
+            h('td',null,h('input',{type:'number',inputMode:'numeric',value:f.items[i].qty,placeholder:'0',onChange:e=>setI(i,'qty')(e.target.value)})),
+            h('td',null,h('input',{type:'number',inputMode:'decimal',step:'any',className:f.items[i]._auto?'auto':'',value:f.items[i].cloth_used,onChange:e=>setI(i,'cloth_used')(e.target.value)})));}))))),
     h('div',{className:'h2'},'Leftover cloth sent back with goods'),
     vstock&&h('div',{className:'note',style:{paddingTop:0}},'Cloth with this tailor now: '+vstock.lines.map(l=>`${l.cloth_name} ${qn(l.stock)} ${l.unit}`).join(', ')),
     f.returns.map((r,i)=>h('div',{key:i,className:'line'},
@@ -445,38 +669,67 @@ function DeliveryForm({M,orderId,initial,onClose,onDone}){
 
 function PickOrderSheet({onClose,onPick}){
   const[os]=useLoad('/stitch-orders');
+  const L=(os||[]).filter(o=>!o.closed);
   return h(Sheet,{title:'Which stitch order?',onClose},!os?Spin():
-    h('div',{className:'card'},os.filter(o=>!o.closed).length?os.filter(o=>!o.closed).map(o=>h('button',{key:o.id,className:'li',onClick:()=>onPick(o.id)},
-      h('div',{className:'f1'},h('div',{className:'b'},o.number+' · '+o.vendor_name),h('div',{className:'mut xs'},`${qn(o.delivered)} / ${qn(o.qty)} pcs · ${fd(o.date)}`)),'›'))
+    h('div',{className:'card'},L.length?L.map(o=>h('button',{key:o.id,className:'li',onClick:()=>onPick(o.id)},
+      h('div',{className:'f1'},h('div',{className:'b'},o.number+' · '+o.vendor_name),h('div',{className:'mut xs ell'},`${qn(o.delivered)} / ${qn(o.qty)} pcs · ${fd(o.date)}${o.schools?' · '+o.schools:''}`)),'›'))
       :Empty('No open stitch orders')));
+}
+
+// ── TAILOR BILL ─────────────────────────────────────────────────────────────
+function BillForm({orderId,initial,onClose,onDone,user}){
+  const[f,setF]=useState(()=>({bill_no:'',date:today(),amount:'',notes:'',...(initial||{})}));
+  const set=k=>v=>setF(x=>({...x,[k]:v}));const s=useSaver(onDone);
+  const del_=async()=>{if(!confirm('Delete this bill?'))return;s.run(()=>DEL('/stitch-bills/'+f.id));};
+  return h(Sheet,{title:f.id?'Edit tailor bill':'Tailor bill',onClose,foot:h(Fragment,null,
+      f.id&&h('button',{className:'btn sec',style:{color:'var(--bad)'},onClick:del_},'Delete'),
+      h('button',{className:'btn',disabled:s.busy,onClick:()=>s.run(()=>f.id?PUT('/stitch-bills/'+f.id,f):POST(`/stitch-orders/${orderId}/bills`,f))},'Save'))},
+    s.err&&h('div',{className:'err'},s.err),
+    h('div',{className:'note'},'Enter the total of the tailor\'s bill. Once a bill is entered, the stitching cost of this order is the bill total instead of pieces × rate.'),
+    Fld('Total bill amount ₹',NumInp(f.amount,set('amount'))),
+    h('div',{className:'g2'},Fld('Bill no.',Inp(f.bill_no,set('bill_no'))),Fld('Bill date',DateInp(f.date,set('date')))),
+    Fld('Notes',Inp(f.notes,set('notes'))));
 }
 
 // ── STITCH ORDER DETAIL ─────────────────────────────────────────────────────
 function StitchDetail({M,id,user,onClose,open}){
-  const[o,load]=useLoad('/stitch-orders/'+id,[M.v]);
+  const[o]=useLoad('/stitch-orders/'+id,[M.v]);
   if(!o)return h(Sheet,{title:'Stitch order',onClose},Spin());
   const pcs=o.items.reduce((a,i)=>a+i.qty,0),del=o.items.reduce((a,i)=>a+i.delivered,0);
-  const c=o.costing.total;
+  const c=o.costing.total;const billTot=o.bills.reduce((a,b)=>a+b.amount,0);
+  const short=o.requirement.some(r=>r.short>0);
   const del_=async()=>{if(!confirm('Delete '+o.number+'?'))return;try{await DEL('/stitch-orders/'+id);toast('Deleted');M.bump();onClose();}catch(e){alert(e.message);}};
   return h(Sheet,{title:o.number,onClose,right:h('button',{className:'btn ghost',onClick:()=>printStitchOrder(o)},'Print'),
     foot:h(Fragment,null,h('button',{className:'btn sec',onClick:()=>open('stitchOrder',{initial:o})},'Edit'),h('button',{className:'btn',onClick:()=>open('delivery',{orderId:id})},'+ Goods received'))},
     h('div',{className:'card cp'},
-      h('div',{className:'row jb'},h('div',null,h('div',{className:'b'},o.vendor_name),h('div',{className:'mut xs'},`Ordered ${fd(o.date)}${o.due_date?' · due '+fd(o.due_date):''}`)),
+      h('div',{className:'row jb'},h('div',{className:'f1'},h('div',{className:'b'},o.vendor_name),h('div',{className:'mut xs'},`Ordered ${fd(o.date)}${o.due_date?' · due '+fd(o.due_date):''}`),
+          o.schools&&h('div',{className:'mut xs'},o.schools)),
         o.closed?Tag('Closed'):del>=pcs?Tag('Complete','ok'):Tag(`${qn(pcs-del)} pending`,'warn')),
       h('div',{className:'bar'},h('i',{style:{width:Math.min(100,pcs?del/pcs*100:0)+'%'}})),
       h('div',{className:'mut xs',style:{marginTop:4}},`${qn(del)} of ${qn(pcs)} pcs despatched by tailor`),
+      o.school_order_id&&h('button',{className:'btn ghost sm',style:{padding:'6px 0'},onClick:()=>open('schoolDetail',{id:o.school_order_id})},'School order '+o.school_order_number+' ›'),
       o.notes&&h('div',{className:'sm',style:{marginTop:8}},o.notes)),
-    h('div',{className:'h2'},'Lines'),
-    h('div',{className:'card tw'},h('table',{className:'t'},
-      h('thead',null,h('tr',null,h('th',null,'Product'),h('th',{className:'n'},'Ord'),h('th',{className:'n'},'Recd'),h('th',{className:'n'},'Cloth used'))),
-      h('tbody',null,o.items.map(i=>h('tr',{key:i.id},h('td',null,i.product_name,i.size?h('div',{className:'mut xs'},'Size '+i.size+' · '+rs2(i.rate)+'/pc'):h('div',{className:'mut xs'},rs2(i.rate)+'/pc')),
-        h('td',{className:'n'},qn(i.qty)),h('td',{className:'n'},qn(i.received),i.delivered>i.received?h('div',{className:'xs mut'},`+${qn(i.delivered-i.received)} transit`):null),
-        h('td',{className:'n'},i.cloth_used?qn(i.cloth_used)+' '+(i.unit||'m'):'—')))))),
+    groupLines(o.items,i=>[i.school_name||'',i.item_name,i.cloth_name||''].join('|')).map(([k,ls])=>{const l=ls[0];return h(Fragment,{key:k},
+      h('div',{className:'h2'},l.item_name+(l.school_name?' · '+l.school_name:'')),
+      h('div',{className:'sub',style:{margin:'-4px 4px 8px'}},[l.cloth_name&&`${l.cloth_name}${l.width?' '+qn(l.width)+'"':''}`,l.rate&&rs2(l.rate)+'/pc'].filter(Boolean).join(' · ')),
+      h('div',{className:'card tw'},h('table',{className:'t'},
+        h('thead',null,h('tr',null,h('th',null,'Size'),h('th',{className:'n'},'Ord'),h('th',{className:'n'},'Recd'),h('th',{className:'n'},'Cloth need'),h('th',{className:'n'},'Used'))),
+        h('tbody',null,ls.map(i=>h('tr',{key:i.id},h('td',null,i.size||'—'),h('td',{className:'n'},qn(i.qty)),
+          h('td',{className:'n'},qn(i.received),i.delivered>i.received?h('div',{className:'xs mut'},`+${qn(i.delivered-i.received)} transit`):null),
+          h('td',{className:'n'},i.cons_per_pc?qn(i.qty*i.cons_per_pc):'—'),h('td',{className:'n'},i.cloth_used?qn(i.cloth_used):'—')))))));}),
+    h('div',{className:'h2'},'Material required'),
+    h(RequirementTable,{req:o.requirement}),
+    o.cloth_orders.length>0&&h('div',{className:'card'},o.cloth_orders.map(co=>h('button',{key:co.id,className:'li',onClick:()=>open('clothDetail',{id:co.id})},
+      h('div',{className:'f1'},h('div',{className:'sm b'},'Cloth order '+co.number),h('div',{className:'mut xs'},co.vendor_name+' · '+fd(co.date))),'›'))),
+    h('button',{className:'btn sec blk',style:{marginBottom:6},onClick:()=>open('material',{id})},short?'Arrange cloth for shortfall':'Link cloth orders'),
     h('div',{className:'h2'},'Cost of this order'),
     h('div',{className:'card cp'},c.pcs?h('dl',{className:'kv'},
-      h('dt',null,'Cloth'),h('dd',null,rs2(c.cloth_cost)),h('dt',null,'Stitching'),h('dd',null,rs2(c.stitch_cost)),
+      h('dt',null,'Cloth'),h('dd',null,rs2(c.cloth_cost)),h('dt',null,billTot?'Stitching (tailor bill)':'Stitching'),h('dd',null,rs2(c.stitch_cost)),
       h('dt',null,'Other charges'),h('dd',null,rs2(c.other_cost)),h('dt',null,'Total'),h('dd',null,rs2(c.total)),
       h('dt',{className:'b',style:{color:'var(--tx)'}},'Average per piece'),h('dd',{style:{color:'var(--pri2)',fontSize:17}},rs2(c.avg))):Empty('Costing appears once goods are received')),
+    h('div',{className:'row jb'},h('div',{className:'h2'},`Tailor bills${billTot?' · '+rs(billTot):''}`),h('button',{className:'btn ghost sm',onClick:()=>open('bill',{orderId:id})},'+ Add bill')),
+    h('div',{className:'card'},o.bills.length?o.bills.map(b=>h('button',{key:b.id,className:'li',onClick:()=>open('bill',{orderId:id,initial:b})},
+      h('div',{className:'f1'},h('div',{className:'sm b'},b.bill_no?'Bill '+b.bill_no:'Bill'),h('div',{className:'mut xs'},fd(b.date)+(b.notes?' · '+b.notes:''))),h('div',{className:'b'},rs2(b.amount)))):Empty('No bill yet — stitching is costed at pieces × rate')),
     o.charges.length>0&&h(Fragment,null,h('div',{className:'h2'},'Other charges'),h('div',{className:'card'},o.charges.map(x=>h('div',{key:x.id,className:'li'},
       h('div',{className:'f1'},h('div',{className:'sm b'},x.head),h('div',{className:'mut xs'},fd(x.date)+(x.notes?' · '+x.notes:''))),h('div',{className:'b'},rs2(x.amount)))))),
     h('div',{className:'h2'},'Goods despatched by tailor'),
@@ -496,7 +749,7 @@ function ClothOrderDetail({M,id,user,onClose,open}){
   const[o]=useLoad('/cloth-orders/'+id,[M.v]);
   if(!o)return h(Sheet,{title:'Cloth order',onClose},Spin());
   const tot=o.items.reduce((a,i)=>a+i.qty*i.rate,0);
-  const dAmt=o.despatches.reduce((a,d)=>a+d.qty*d.rate+(d.freight||0),0);
+  const dAmt=o.despatches.reduce((a,d)=>a+(d.amount??d.qty*d.rate)+(d.freight||0),0);
   const del_=async()=>{if(!confirm('Delete '+o.number+'?'))return;try{await DEL('/cloth-orders/'+id);toast('Deleted');M.bump();onClose();}catch(e){alert(e.message);}};
   return h(Sheet,{title:o.number,onClose,right:h('button',{className:'btn ghost',onClick:()=>printClothOrder(o)},'Print'),
     foot:h(Fragment,null,h('button',{className:'btn sec',onClick:()=>open('clothOrder',{initial:o})},'Edit'),h('button',{className:'btn',onClick:()=>open('despatch',{orderId:id})},'+ Despatch'))},
@@ -505,31 +758,55 @@ function ClothOrderDetail({M,id,user,onClose,open}){
     h('div',{className:'h2'},'Ordered vs despatched'),
     h('div',{className:'card tw'},h('table',{className:'t'},
       h('thead',null,h('tr',null,h('th',null,'Cloth'),h('th',{className:'n'},'Ordered'),h('th',{className:'n'},'Sent'),h('th',{className:'n'},'Amount'))),
-      h('tbody',null,o.items.map(i=>h('tr',{key:i.id},h('td',null,i.cloth_name,h('div',{className:'mut xs'},rs2(i.rate)+'/'+i.unit)),
+      h('tbody',null,o.items.map(i=>h('tr',{key:i.id},h('td',null,i.cloth_name,h('div',{className:'mut xs'},rs2(i.rate)+'/'+i.unit+(i.width?' · '+qn(i.width)+'"':''))),
         h('td',{className:'n'},qn(i.qty)),h('td',{className:'n'},qn(i.despatched),i.despatched>i.qty?h('div',{className:'xs',style:{color:'var(--warn)'}},'+'+qn(i.despatched-i.qty)+' extra'):null),h('td',{className:'n'},rs(i.qty*i.rate))))),
       h('tfoot',null,h('tr',null,h('td',{colSpan:3},'Order value'),h('td',{className:'n'},rs(tot)))))),
+    h('div',{className:'h2'},'For stitch orders'),
+    o.stitch_orders.length?h(Fragment,null,
+      h('div',{className:'card'},o.stitch_orders.map(s=>h('button',{key:s.id,className:'li',onClick:()=>open('stitchDetail',{id:s.id})},
+        h('div',{className:'f1'},h('div',{className:'sm b'},s.number+' · '+s.vendor_name),h('div',{className:'mut xs'},fd(s.date))),'›'))),
+      h('div',{className:'card tw'},h('table',{className:'t'},h('thead',null,h('tr',null,h('th',null,'Cloth'),h('th',{className:'n'},'Needed'),h('th',{className:'n'},'This order'),h('th',{className:'n'},'Extra'))),
+        h('tbody',null,o.requirement.map(r=>{const mine=o.items.filter(i=>i.cloth_id===r.cloth_id).reduce((a,i)=>a+i.qty,0);
+          return h('tr',{key:r.cloth_id},h('td',null,r.cloth_name),h('td',{className:'n'},qn(r.required)),h('td',{className:'n'},qn(mine)),h('td',{className:'n'},qn(mine-r.required)));})))))
+      :h('div',{className:'card'},Empty('Not linked to any stitch order — use Edit to tick the stitch orders this cloth is for')),
     h('div',{className:'h2'},`Despatches · ${rs(dAmt)}`),
     h('div',{className:'card'},o.despatches.length?o.despatches.map(d=>h('button',{key:d.id,className:'li',onClick:()=>open('despatch',{initial:d})},
       h('div',{className:'f1'},h('div',{className:'sm b'},`${qn(d.qty)} ${d.unit} ${d.cloth_name} → ${d.dest_name}`),
-        h('div',{className:'mut xs'},`${d.number} · ${rs2(d.rate)}/${d.unit} = ${rs(d.qty*d.rate)}${d.freight?' + '+rs(d.freight)+' freight':''} · sent ${fd(d.despatch_date)}`)),
+        h('div',{className:'mut xs'},`${d.number} · ${rs(d.amount??d.qty*d.rate)} (${rs2(d.rate)}/${d.unit})${d.freight?' + '+rs(d.freight)+' freight':''} · sent ${fd(d.despatch_date)}`)),
       d.received_date?Tag('Recd '+fd(d.received_date),'ok'):Tag('Transit','warn'))):Empty('Nothing despatched yet')),
     user.role==='admin'&&h('button',{className:'btn ghost blk',style:{color:'var(--bad)',marginTop:10},onClick:del_},'Delete order'));
 }
 
-// ── STITCH TAB ──────────────────────────────────────────────────────────────
+// ── TABS ────────────────────────────────────────────────────────────────────
+function useSearch(){const[qs,setQs]=useState('');return[qs,t=>!qs||t.toLowerCase().includes(qs.toLowerCase()),h('input',{className:'in srch',placeholder:'Search…',value:qs,onChange:e=>setQs(e.target.value)})];}
+
+function SchoolsTab({M,open}){
+  const[flt,setFlt]=useState('open');const[,match,box]=useSearch();
+  const[os]=useLoad('/school-orders',[M.v]);
+  const L=(os||[]).filter(o=>(flt==='all'||!o.closed)&&match(o.number+' '+o.school_name+' '+(o.ref||'')+' '+o.items.map(i=>i.item_name).join(' ')));
+  return h('div',{className:'page'},box,
+    h('div',{className:'seg'},['open','all'].map(k=>h('button',{key:k,className:flt===k?'on':'',onClick:()=>setFlt(k)},k==='open'?'Open':'All'))),
+    !os?Spin():h('div',{className:'card'},L.length?L.map(o=>{const left=o.qty-o.stitch_ordered;return h('button',{key:o.id,className:'li',onClick:()=>open('schoolDetail',{id:o.id})},
+      h('div',{className:'f1'},h('div',{className:'row jb'},h('span',{className:'b ell'},o.school_name),
+          o.closed?Tag('Closed'):o.received>=o.qty?Tag('Ready','ok'):left>0?Tag(qn(left)+' not given','warn'):Tag('With tailors','inf')),
+        h('div',{className:'mut xs ell'},`${o.number} · ${fd(o.date)} · ${qn(o.qty)} pcs · ${[...new Set(o.items.map(i=>i.item_name))].join(', ')}`),
+        h('div',{className:'bar'},h('i',{style:{width:Math.min(100,o.qty?o.received/o.qty*100:0)+'%'}}))));})
+      :Empty('No school orders yet. Tap + when a school places an order.')),
+    h('button',{className:'fab',onClick:()=>open('schoolOrder'),'aria-label':'Add'},'+'));
+}
+
 function StitchTab({M,open}){
-  const[seg,setSeg]=useState('orders');const[qs,setQs]=useState('');const[flt,setFlt]=useState('open');
+  const[seg,setSeg]=useState('orders');const[flt,setFlt]=useState('open');const[,match,box]=useSearch();
   const[os]=useLoad('/stitch-orders',[M.v]);const[ds]=useLoad('/stitch-deliveries',[M.v]);
-  const match=t=>!qs||t.toLowerCase().includes(qs.toLowerCase());
   return h('div',{className:'page'},
     h('div',{className:'seg'},h('button',{className:seg==='orders'?'on':'',onClick:()=>setSeg('orders')},'Stitch orders'),h('button',{className:seg==='del'?'on':'',onClick:()=>setSeg('del')},'Goods received')),
-    h('input',{className:'in srch',placeholder:'Search number, tailor, product…',value:qs,onChange:e=>setQs(e.target.value)}),
+    box,
     seg==='orders'?h(Fragment,null,
       h('div',{className:'seg'},['open','all'].map(k=>h('button',{key:k,className:flt===k?'on':'',onClick:()=>setFlt(k)},k==='open'?'Open':'All'))),
-      !os?Spin():h('div',{className:'card'},(()=>{const L=os.filter(o=>(flt==='all'||!o.closed)&&match(o.number+' '+o.vendor_name+' '+o.items.map(i=>i.product_name+' '+(i.school||'')).join(' ')));
+      !os?Spin():h('div',{className:'card'},(()=>{const L=os.filter(o=>(flt==='all'||!o.closed)&&match(o.number+' '+o.vendor_name+' '+o.schools+' '+o.items.map(i=>i.item_name).join(' ')));
         return L.length?L.map(o=>h('button',{key:o.id,className:'li',onClick:()=>open('stitchDetail',{id:o.id})},
           h('div',{className:'f1'},h('div',{className:'row jb'},h('span',{className:'b'},o.number),o.closed?Tag('Closed'):o.delivered>=o.qty?Tag('Complete','ok'):o.due_date&&o.due_date<today()?Tag('Overdue','bad'):Tag(qn(o.qty-o.delivered)+' pending','warn')),
-            h('div',{className:'sm ell'},o.vendor_name),h('div',{className:'mut xs ell'},fd(o.date)+' · '+[...new Set(o.items.map(i=>i.product_name))].join(', ')),
+            h('div',{className:'sm ell'},o.vendor_name+(o.schools?' · '+o.schools:'')),h('div',{className:'mut xs ell'},fd(o.date)+' · '+[...new Set(o.items.map(i=>i.item_name))].join(', ')),
             h('div',{className:'bar'},h('i',{style:{width:Math.min(100,o.qty?o.delivered/o.qty*100:0)+'%'}})))))
           :Empty('No stitch orders yet. Tap + to create one.');})()))
     :!ds?Spin():h('div',{className:'card'},(()=>{const L=ds.filter(d=>match(d.number+' '+d.vendor_name+' '+d.order_number+' '+(d.challan_no||'')));
@@ -540,117 +817,166 @@ function StitchTab({M,open}){
     h('button',{className:'fab',onClick:()=>open(seg==='orders'?'stitchOrder':'pickOrderForDelivery'),'aria-label':'Add'},'+'));
 }
 
-// ── CLOTH TAB ───────────────────────────────────────────────────────────────
 function ClothTab({M,open}){
-  const[seg,setSeg]=useState('orders');const[qs,setQs]=useState('');
+  const[seg,setSeg]=useState('orders');const[,match,box]=useSearch();
   const[os]=useLoad('/cloth-orders',[M.v]);const[ds]=useLoad('/cloth-despatches',[M.v]);const[ts]=useLoad('/cloth-transfers',[M.v]);
-  const match=t=>!qs||t.toLowerCase().includes(qs.toLowerCase());
   const list=(data,fn,empty)=>!data?Spin():h('div',{className:'card'},data.filter(fn.m).length?data.filter(fn.m).map(fn.r):Empty(empty));
   return h('div',{className:'page'},
     h('div',{className:'seg'},[['orders','Orders'],['desp','Despatches'],['moves','Moves']].map(([k,l])=>h('button',{key:k,className:seg===k?'on':'',onClick:()=>setSeg(k)},l))),
-    h('input',{className:'in srch',placeholder:'Search…',value:qs,onChange:e=>setQs(e.target.value)}),
-    seg==='orders'&&list(os,{m:o=>match(o.number+' '+o.vendor_name+' '+o.items.map(i=>i.cloth_name).join(' ')),
+    box,
+    seg==='orders'&&list(os,{m:o=>match(o.number+' '+o.vendor_name+' '+o.items.map(i=>i.cloth_name).join(' ')+' '+o.stitch_orders.map(s=>s.number).join(' ')),
       r:o=>h('button',{key:o.id,className:'li',onClick:()=>open('clothDetail',{id:o.id})},
         h('div',{className:'f1'},h('div',{className:'row jb'},h('span',{className:'b'},o.number),o.closed?Tag('Closed'):o.despatched>=o.qty?Tag('Fully sent','ok'):Tag(qn(o.qty-o.despatched)+' pending','warn')),
-          h('div',{className:'sm ell'},o.vendor_name+' · '+rs(o.amount)),h('div',{className:'mut xs ell'},fd(o.date)+' · '+o.items.map(i=>`${i.cloth_name} ${qn(i.qty)}${i.unit}`).join(', '))))},'No cloth orders yet'),
+          h('div',{className:'sm ell'},o.vendor_name+' · '+rs(o.amount)),h('div',{className:'mut xs ell'},fd(o.date)+' · '+o.items.map(i=>`${i.cloth_name} ${qn(i.qty)}${i.unit}`).join(', ')+(o.stitch_orders.length?' · for '+o.stitch_orders.map(s=>s.number).join(', '):''))))},'No cloth orders yet'),
     seg==='desp'&&list(ds,{m:d=>match(d.number+' '+d.vendor_name+' '+d.cloth_name+' '+d.dest_name+' '+(d.order_number||'')+' '+(d.challan_no||'')),
       r:d=>h('button',{key:d.id,className:'li',onClick:()=>open('despatch',{initial:d})},
         h('div',{className:'f1'},h('div',{className:'row jb'},h('span',{className:'b'},`${qn(d.qty)} ${d.unit} ${d.cloth_name}`),d.received_date?Tag('Recd '+fd(d.received_date),'ok'):Tag('Transit','warn')),
           h('div',{className:'sm ell'},`${d.vendor_name} → ${d.dest_name}`),
-          h('div',{className:'mut xs ell'},`${d.number}${d.order_number?' · '+d.order_number:''} · ${rs(d.qty*d.rate+(d.freight||0))} · sent ${fd(d.despatch_date)}`)))},'No despatches recorded'),
+          h('div',{className:'mut xs ell'},`${d.number}${d.order_number?' · '+d.order_number:''} · ${rs((d.amount??d.qty*d.rate)+(d.freight||0))} · sent ${fd(d.despatch_date)}`)))},'No despatches recorded'),
     seg==='moves'&&list(ts,{m:t=>match(t.number+' '+t.cloth_name+' '+t.from_name+' '+t.to_name),
-      r:t=>h('button',{key:t.id,className:'li',onClick:()=>t.delivery_id?open('delivery',{orderId:t.stitch_order_id,initial:null,deliveryId:t.delivery_id}):open('transfer',{initial:t})},
+      r:t=>h('button',{key:t.id,className:'li',onClick:()=>t.delivery_id?open('delivery',{deliveryId:t.delivery_id}):open('transfer',{initial:t})},
         h('div',{className:'f1'},h('div',{className:'row jb'},h('span',{className:'b'},`${qn(t.qty)} ${t.unit} ${t.cloth_name}`),t.received_date?Tag('Recd '+fd(t.received_date),'ok'):Tag('Transit','warn')),
           h('div',{className:'sm ell'},`${t.from_name} → ${t.to_name}`),
           h('div',{className:'mut xs ell'},`${t.number} · ${fd(t.despatch_date)}${t.stitch_order_number?' · '+t.stitch_order_number:''}${t.delivery_number?' · with '+t.delivery_number:''}`)))},'No cloth moved between you and tailors yet'),
     h('button',{className:'fab',onClick:()=>open(seg==='orders'?'clothOrder':seg==='desp'?'despatch':'transfer'),'aria-label':'Add'},'+'));
 }
 
-// ── STOCK TAB ───────────────────────────────────────────────────────────────
-function StockTab({M,open}){
-  const[st]=useLoad('/stock',[M.v]);
-  if(!st)return Spin();
-  const total=st.locations.reduce((a,l)=>a+l.value,0);
+// ── REPORTS ─────────────────────────────────────────────────────────────────
+function ReportsTab({open}){
+  const R=(t,s,k)=>h('button',{className:'li',onClick:()=>open(k)},h('div',{className:'f1'},h('div',{className:'b'},t),h('div',{className:'mut xs'},s)),'›');
   return h('div',{className:'page'},
-    h('div',{className:'kp'},h('div',{className:'k hero'},h('div',{className:'l'},'Cloth stock value (all locations)'),h('div',{className:'v'},rs(total)),h('div',{className:'s'},'at average landed rate'))),
+    h('div',{className:'card'},
+      R('Cloth stock','With you, with each tailor, on the way, and still to come from vendors','stock'),
+      R('Manufacturing cost','Average cost per piece by school, item & size','costing'),
+      R('School-wise status','Ordered by each school, given to tailors, received','repSchools'),
+      R('Tailor-wise pending','Pieces pending and cloth lying with each tailor','repTailors')),
+    h('div',{className:'note',style:{textAlign:'center'}},'More reports will be added here.'));
+}
+
+function StockView({M,onClose,open}){
+  const[st]=useLoad('/stock',[M.v]);
+  return h(Sheet,{title:'Cloth stock',onClose},!st?Spin():h(Fragment,null,
+    h('div',{className:'kp'},h('div',{className:'k hero'},h('div',{className:'l'},'Cloth stock value (all locations)'),h('div',{className:'v'},rs(st.locations.reduce((a,l)=>a+l.value,0))),h('div',{className:'s'},'at average landed rate'))),
     st.locations.length?st.locations.map(L=>h('div',{key:L.loc,className:'card'},
       h('div',{className:'li'},h('div',{className:'f1'},h('div',{className:'b'},L.name),h('div',{className:'mut xs'},L.loc==='self'?'Your godown':'Cloth lying with this tailor')),h('div',{className:'b'},rs(L.value))),
       h('div',{className:'tw'},h('table',{className:'t'},h('thead',null,h('tr',null,h('th',null,'Cloth'),h('th',{className:'n'},'In'),h('th',{className:'n'},'Out/used'),h('th',{className:'n'},'Stock'))),
         h('tbody',null,L.lines.map(x=>h('tr',{key:x.cloth_id},h('td',null,x.cloth_name,x.colour?h('div',{className:'mut xs'},x.colour):null,x.transit?h('div',{className:'xs',style:{color:'var(--warn)'}},`+${qn(x.transit)} ${x.unit} on the way`):null),
           h('td',{className:'n'},qn(x.in)),h('td',{className:'n'},qn(x.out+x.used),x.used?h('div',{className:'mut xs'},`${qn(x.used)} used`):null),
-          h('td',{className:'n b',style:{color:x.stock<0?'var(--bad)':undefined}},qn(x.stock)+' '+x.unit))))))
-      ,L.loc!=='self'&&L.lines.some(x=>x.stock>0)&&h('div',{className:'cp',style:{paddingTop:6}},h('button',{className:'btn sec sm',onClick:()=>open('transfer',{initial:{from_loc:L.loc,to_loc:'self'}})},'Take back leftover cloth'))))
+          h('td',{className:'n b',style:{color:x.stock<0?'var(--bad)':undefined}},qn(x.stock)+' '+x.unit)))))),
+      L.loc!=='self'&&L.lines.some(x=>x.stock>0)&&h('div',{className:'cp',style:{paddingTop:6}},h('button',{className:'btn sec sm',onClick:()=>open('transfer',{initial:{from_loc:L.loc,to_loc:'self'}})},'Take back leftover cloth'))))
       :Empty('No cloth stock yet'),
     h('div',{className:'h2'},'Still to come from cloth vendors'),
     h('div',{className:'card'},st.pending_from_vendors.length?st.pending_from_vendors.map((p,i)=>h('div',{key:i,className:'li'},
       h('div',{className:'f1'},h('div',{className:'sm b'},p.cloth_name),h('div',{className:'mut xs'},`${p.number} · ${p.vendor_name} · ${fd(p.date)}`)),
       h('div',{className:'b'},qn(p.qty-p.despatched)+' '+p.unit))):Empty('All ordered cloth has been despatched')),
     h('div',{className:'h2'},'Finished goods received'),
-    h('div',{className:'card tw'},st.goods_received.length?h('table',{className:'t'},h('thead',null,h('tr',null,h('th',null,'Product'),h('th',null,'Size'),h('th',{className:'n'},'Pcs'))),
-      h('tbody',null,st.goods_received.map((g,i)=>h('tr',{key:i},h('td',null,g.product_name,g.school?h('div',{className:'mut xs'},g.school):null),h('td',null,g.size||'—'),h('td',{className:'n b'},qn(g.qty))))),
+    h('div',{className:'card tw'},st.goods_received.length?h('table',{className:'t'},h('thead',null,h('tr',null,h('th',null,'Item'),h('th',null,'Size'),h('th',{className:'n'},'Pcs'))),
+      h('tbody',null,st.goods_received.map((g,i)=>h('tr',{key:i},h('td',null,g.item_name,g.school_name?h('div',{className:'mut xs'},g.school_name):null),h('td',null,g.size||'—'),h('td',{className:'n b'},qn(g.qty))))),
       h('tfoot',null,h('tr',null,h('td',{colSpan:2},'Total'),h('td',{className:'n'},qn(st.goods_received.reduce((a,g)=>a+g.qty,0))))))
       :Empty('No finished goods received yet')),
-    h('div',{className:'note'},'Negative stock at a tailor means more cloth was booked as used or returned than was sent — check the entries.'));
+    h('div',{className:'note'},'Negative stock at a tailor means more cloth was booked as used or returned than was sent — check the entries.')));
 }
 
-// ── COSTING ─────────────────────────────────────────────────────────────────
 function Costing({M,onClose}){
   const[c]=useLoad('/costing',[M.v]);const[by,setBy]=useState('product');
   return h(Sheet,{title:'Manufacturing cost',onClose},!c?Spin():h(Fragment,null,
     h('div',{className:'kp'},
-      h('div',{className:'k hero'},h('div',{className:'l'},'Average cost per piece (all products)'),h('div',{className:'v'},rs2(c.total.avg)),h('div',{className:'s'},`${qn(c.total.pcs)} pcs · ${rs(c.total.total)} total`)),
-      h('div',{className:'k'},h('div',{className:'l'},'Cloth'),h('div',{className:'v',style:{fontSize:18}},rs(c.total.cloth_cost)),h('div',{className:'s'},qn(c.total.cloth_used)+' used')),
+      h('div',{className:'k hero'},h('div',{className:'l'},'Average cost per piece (all items)'),h('div',{className:'v'},rs2(c.total.avg)),h('div',{className:'s'},`${qn(c.total.pcs)} pcs · ${rs(c.total.total)} total`)),
+      h('div',{className:'k'},h('div',{className:'l'},'Cloth'),h('div',{className:'v',style:{fontSize:18}},rs(c.total.cloth_cost)),h('div',{className:'s'},qn(c.total.cloth_used)+' m used')),
       h('div',{className:'k'},h('div',{className:'l'},'Stitching + other'),h('div',{className:'v',style:{fontSize:18}},rs(c.total.stitch_cost+c.total.other_cost)),h('div',{className:'s'},'other '+rs(c.total.other_cost)))),
-    h('div',{className:'seg'},h('button',{className:by==='product'?'on':'',onClick:()=>setBy('product')},'By product & size'),h('button',{className:by==='order'?'on':'',onClick:()=>setBy('order')},'By order')),
+    h('div',{className:'seg'},h('button',{className:by==='product'?'on':'',onClick:()=>setBy('product')},'By school, item & size'),h('button',{className:by==='order'?'on':'',onClick:()=>setBy('order')},'By order')),
     h('div',{className:'card tw'},(by==='product'?c.products:c.lines).length?h('table',{className:'t'},
-      h('thead',null,h('tr',null,h('th',null,by==='product'?'Product':'Order / product'),h('th',{className:'n'},'Pcs'),h('th',{className:'n'},'Cloth'),h('th',{className:'n'},'Stitch'),h('th',{className:'n'},'Other'),h('th',{className:'n'},'Avg/pc'))),
+      h('thead',null,h('tr',null,h('th',null,'Item'),h('th',{className:'n'},'Pcs'),h('th',{className:'n'},'Cloth'),h('th',{className:'n'},'Stitch'),h('th',{className:'n'},'Other'),h('th',{className:'n'},'Avg/pc'))),
       h('tbody',null,(by==='product'?c.products:c.lines).map((x,i)=>h('tr',{key:i},
-        h('td',null,by==='order'?h('div',{className:'xs mut'},x.order_number+' · '+x.vendor_name):null,x.product_name,x.size?' · '+x.size:'',
-          h('div',{className:'mut xs'},`${qn(x.cloth_used)} m cloth${by==='order'?' @ '+rs2(x.cloth_rate):''}`)),
+        h('td',null,by==='order'?h('div',{className:'xs mut'},x.order_number+' · '+x.vendor_name):null,x.item_name,x.size?' · '+x.size:'',
+          h('div',{className:'mut xs'},`${x.school_name?x.school_name+' · ':''}${qn(x.cloth_used)} m${by==='order'?' @ '+rs2(x.cloth_rate):''}${x.billed?' · billed':''}`)),
         h('td',{className:'n'},qn(x.pcs)),h('td',{className:'n'},rs(x.cloth_cost)),h('td',{className:'n'},rs(x.stitch_cost)),h('td',{className:'n'},rs(x.other_cost)),
         h('td',{className:'n b',style:{color:'var(--pri2)'}},rs2(x.avg))))))
       :Empty('Record goods received from a tailor to see costing')),
-    c.total.unallocated_charges>0&&h('div',{className:'err'},`${rs(c.total.unallocated_charges)} of other charges belong to orders with no goods received yet — they'll be included once goods arrive.`),
-    h('div',{className:'note'},'How it is worked out: cloth cost = cloth used × average landed rate of that cloth (all purchases incl. freight); stitching = pieces × stitching rate; other charges of an order are spread over its pieces. Leftover cloth is not charged to products — it stays in stock at its value.')));
+    c.total.unallocated_charges>0&&h('div',{className:'err'},`${rs(c.total.unallocated_charges)} of charges/bills belong to orders with no goods received yet — they'll be included once goods arrive.`),
+    h('div',{className:'note'},'Cloth cost = cloth used × average landed rate of that cloth (all bills incl. freight). Stitching = pieces × rate, or the tailor\'s bill total when entered. Other charges of an order are spread over its pieces. Leftover cloth is not charged to the uniforms — it stays in stock at its value.')));
+}
+
+function RepSchools({M,onClose,open}){
+  const[d]=useLoad('/reports/schools',[M.v]);
+  return h(Sheet,{title:'School-wise status',onClose},!d?Spin():d.length?d.map(s=>h('div',{key:s.school_name,className:'card'},
+    h('div',{className:'li'},h('div',{className:'f1'},h('div',{className:'b'},s.school_name),h('div',{className:'mut xs'},`${qn(s.qty)} ordered · ${qn(s.stitch_ordered)} with tailors · ${qn(s.received)} received`)),
+      Tag(qn(Math.max(s.qty-s.received,0))+' to come',s.received>=s.qty?'ok':'warn')),
+    s.orders.map(o=>h('button',{key:o.id,className:'li',onClick:()=>open('schoolDetail',{id:o.id})},
+      h('div',{className:'f1'},h('div',{className:'sm'},`${o.number} · ${fd(o.date)}${o.due_date?' · due '+fd(o.due_date):''}`),
+        h('div',{className:'bar'},h('i',{style:{width:Math.min(100,o.qty?o.received/o.qty*100:0)+'%'}}))),
+      h('div',{className:'xs mut'},`${qn(o.received)}/${qn(o.qty)}`)))))
+    :Empty('No school orders yet'));
+}
+
+function RepTailors({M,onClose}){
+  const[d]=useLoad('/reports/tailors',[M.v]);
+  return h(Sheet,{title:'Tailor-wise pending',onClose},!d?Spin():d.length?d.map(t=>h('div',{key:t.id,className:'card cp'},
+    h('div',{className:'row jb'},h('div',{className:'b'},t.name),t.pending?Tag(qn(t.pending)+' pcs pending','warn'):Tag('Nothing pending','ok')),
+    h('div',{className:'mut xs',style:{margin:'4px 0 6px'}},`${qn(t.delivered)} of ${qn(t.ordered)} pcs delivered in open orders`),
+    t.cloth.length?t.cloth.map((c,i)=>h('div',{key:i,className:'row jb sm'},h('span',null,c.cloth_name),h('span',{className:'b'},`${qn(c.stock)} ${c.unit}${c.transit?` (+${qn(c.transit)} coming)`:''}`))):h('div',{className:'xs mut'},'No cloth with this tailor')))
+    :Empty('No tailor activity yet'));
 }
 
 // ── MASTERS ─────────────────────────────────────────────────────────────────
 const MASTER_DEF={
-  vendors:{title:'Vendors',one:'vendor',sub:v=>({cloth:'Cloth supplier',stitch:'Stitching (tailor)',both:'Cloth + stitching'}[v.type])+(v.phone?' · '+v.phone:''),
+  vendors:{title:'Vendors',one:'vendor',sub:v=>({cloth:'Cloth supplier',stitch:'Tailor (stitching)',both:'Cloth + stitching'}[v.type])+(v.phone?' · '+v.phone:''),
     blank:{name:'',type:'stitch',phone:'',address:'',gstin:'',notes:'',active:1}},
-  cloths:{title:'Cloth types',one:'cloth',sub:c=>[c.colour,c.unit].filter(Boolean).join(' · '),blank:{name:'',colour:'',unit:'m',notes:'',active:1}},
-  products:{title:'Products',one:'product',sub:(p,M)=>[p.school,p.stitch_rate?rs2(p.stitch_rate)+'/pc':null,p.cloth_id?clothOf(M,p.cloth_id).name+' '+qn(p.cons_per_pc)+'/pc':null].filter(Boolean).join(' · '),
-    blank:{name:'',school:'',cloth_id:'',cons_per_pc:'',stitch_rate:'',notes:'',active:1}},
+  schools:{title:'Schools',one:'school',sub:s=>[s.contact,s.phone].filter(Boolean).join(' · '),blank:{name:'',contact:'',phone:'',address:'',notes:'',active:1}},
+  cloths:{title:'Cloth types',one:'cloth',sub:c=>[c.colour,c.width?qn(c.width)+'" wide':null,c.unit].filter(Boolean).join(' · '),blank:{name:'',colour:'',unit:'m',width:58,notes:'',active:1}},
 };
 function MasterForm({M,kind,initial,onClose,onDone}){
   const D=MASTER_DEF[kind];const[f,setF]=useState({...D.blank,...(initial||{})});const set=k=>v=>setF(x=>({...x,[k]:v}));
   const s=useSaver(onDone);
-  const save=()=>s.run(()=>f.id?PUT(`/${kind}/${f.id}`,f):POST('/'+kind,f));
+  const save=()=>s.run(()=>f.id?PUT(`/m/${kind}/${f.id}`,f):POST('/m/'+kind,f));
   return h(Sheet,{title:(f.id?'Edit ':'New ')+D.one,onClose,foot:h('button',{className:'btn',disabled:s.busy,onClick:save},'Save')},
     s.err&&h('div',{className:'err'},s.err),
-    Fld('Name',Inp(f.name,set('name'),{placeholder:kind==='products'?'e.g. Shirt – White half sleeve':kind==='cloths'?'e.g. Terry-cot white':''})),
+    Fld('Name',Inp(f.name,set('name'),{placeholder:kind==='cloths'?'e.g. Terry-cot white shirting':''})),
     kind==='vendors'&&h(Fragment,null,
-      Fld('Type',Sel(f.type,set('type'),[{value:'stitch',label:'Stitching vendor (tailor)'},{value:'cloth',label:'Cloth supplier'},{value:'both',label:'Both'}])),
+      Fld('Type',Sel(f.type,set('type'),[{value:'stitch',label:'Tailor (stitching vendor)'},{value:'cloth',label:'Cloth supplier'},{value:'both',label:'Both'}])),
       Fld('Phone',Inp(f.phone,set('phone'),{type:'tel',inputMode:'tel'})),Fld('Address',Inp(f.address,set('address'))),Fld('GSTIN',Inp(f.gstin,set('gstin')))),
-    kind==='cloths'&&h('div',{className:'g2'},Fld('Colour',Inp(f.colour,set('colour'))),Fld('Unit',Sel(f.unit,set('unit'),['m','kg','pcs'].map(x=>({value:x,label:x}))))),
-    kind==='products'&&h(Fragment,null,
-      Fld('School',Inp(f.school,set('school'))),
-      Fld('Default cloth',Sel(f.cloth_id,set('cloth_id'),clothOpts(M),'—')),
-      h('div',{className:'g2'},Fld('Cloth per piece',NumInp(f.cons_per_pc,set('cons_per_pc'))),Fld('Stitching rate ₹/pc',NumInp(f.stitch_rate,set('stitch_rate')))),
-      h('div',{className:'note',style:{paddingTop:0}},'These fill in automatically on a new stitch order; you can change them per order.')),
+    kind==='schools'&&h(Fragment,null,Fld('Contact person',Inp(f.contact,set('contact'))),Fld('Phone',Inp(f.phone,set('phone'),{type:'tel',inputMode:'tel'})),Fld('Address',Inp(f.address,set('address')))),
+    kind==='cloths'&&h(Fragment,null,h('div',{className:'g2'},Fld('Colour',Inp(f.colour,set('colour'))),Fld('Unit',Sel(f.unit,set('unit'),['m','kg'].map(x=>({value:x,label:x}))))),
+      Fld('Standard width (inch)',NumInp(f.width,set('width')),'Usually 58". Can be changed per order when a lot comes in a different width.')),
     Fld('Notes',Inp(f.notes,set('notes'))),
     f.id&&h('label',{className:'chk'},h('input',{type:'checkbox',checked:!!f.active,onChange:e=>set('active')(e.target.checked?1:0)}),'Active'));
 }
 function MasterList({M,kind,onClose,open}){
-  const D=MASTER_DEF[kind];const[qs,setQs]=useState('');
-  const L=M[kind].filter(x=>!qs||(x.name+' '+(x.school||'')).toLowerCase().includes(qs.toLowerCase()));
-  return h(Sheet,{title:D.title,onClose,foot:h('button',{className:'btn',onClick:()=>open('master',{kind})},'+ Add '+D.one)},
-    h('input',{className:'in srch',placeholder:'Search…',value:qs,onChange:e=>setQs(e.target.value)}),
+  const D=MASTER_DEF[kind];const[,match,box]=useSearch();
+  const L=M[kind].filter(x=>match(x.name));
+  return h(Sheet,{title:D.title,onClose,foot:h('button',{className:'btn',onClick:()=>open('master',{kind})},'+ Add '+D.one)},box,
     h('div',{className:'card'},L.length?L.map(x=>h('button',{key:x.id,className:'li',onClick:()=>open('master',{kind,initial:x}),style:{opacity:x.active?1:.5}},
-      h('div',{className:'f1'},h('div',{className:'b'},x.name),h('div',{className:'mut xs'},D.sub(x,M)||'')),x.active?'›':Tag('Inactive'))):Empty('Nothing added yet')));
+      h('div',{className:'f1'},h('div',{className:'b'},x.name),h('div',{className:'mut xs'},D.sub(x)||'')),x.active?'›':Tag('Inactive'))):Empty('Nothing added yet')));
+}
+function ItemForm({M,initial,onClose,onDone}){
+  const[f,setF]=useState(()=>({name:'',stitch_rate:'',base_width:M.std_width,width_scaling:1,notes:'',active:1,...(initial||{}),sizes:(initial?initial.sizes:[]).map(s=>({...s}))}));
+  const set=k=>v=>setF(x=>({...x,[k]:v}));
+  const setS=(i,k)=>v=>setF(x=>({...x,sizes:x.sizes.map((s,j)=>j===i?{...s,[k]:v}:s)}));
+  const s=useSaver(onDone);
+  const save=()=>s.run(()=>f.id?PUT('/items/'+f.id,f):POST('/items',f));
+  return h(Sheet,{title:f.id?f.name:'New item',onClose,foot:h('button',{className:'btn',disabled:s.busy,onClick:save},'Save')},
+    s.err&&h('div',{className:'err'},s.err),
+    Fld('Item name',Inp(f.name,set('name'),{placeholder:'e.g. Shirt (Half Sleeve)'})),
+    h('div',{className:'g2'},Fld('Default stitching ₹/pc',NumInp(f.stitch_rate,set('stitch_rate'))),Fld('Chart cloth width (inch)',NumInp(f.base_width,set('base_width')))),
+    h('label',{className:'chk'},h('input',{type:'checkbox',checked:!!f.width_scaling,onChange:e=>set('width_scaling')(e.target.checked?1:0)}),'Narrower cloth needs more metres'),
+    h('div',{className:'h2'},'Size chart — cloth per piece (m)'),
+    h('div',{className:'note',style:{paddingTop:0}},`Metres per piece at ${qn(f.base_width)}" width. The standard charts are starting estimates — correct them with your tailor's figures.`),
+    h('div',{className:'card cp',style:{paddingBottom:4}},h('table',{className:'sg'},h('thead',null,h('tr',null,h('th',null,'Size'),h('th',null,'m / pc'),h('th',null,''))),
+      h('tbody',null,f.sizes.map((z,i)=>h('tr',{key:i},h('td',null,h('input',{value:z.size,onChange:e=>setS(i,'size')(e.target.value)})),
+        h('td',null,h('input',{type:'number',inputMode:'decimal',step:'any',value:z.cons,onChange:e=>setS(i,'cons')(e.target.value)})),
+        h('td',{style:{width:40}},h('button',{className:'ib',style:{color:'var(--bad)'},onClick:()=>setF(x=>({...x,sizes:x.sizes.filter((_,j)=>j!==i)}))},'×')))))),
+      h('button',{className:'btn ghost sm',onClick:()=>setF(x=>({...x,sizes:[...x.sizes,{size:'',cons:''}]}))},'+ Add size')),
+    Fld('Notes',Inp(f.notes,set('notes'))),
+    f.id&&h('label',{className:'chk'},h('input',{type:'checkbox',checked:!!f.active,onChange:e=>set('active')(e.target.checked?1:0)}),'Active'));
+}
+function ItemList({M,onClose,open}){
+  const[,match,box]=useSearch();
+  return h(Sheet,{title:'Items & sizes',onClose,foot:h('button',{className:'btn',onClick:()=>open('item')},'+ Add item')},box,
+    h('div',{className:'card'},M.items.filter(x=>match(x.name)).map(x=>h('button',{key:x.id,className:'li',onClick:()=>open('item',{initial:x}),style:{opacity:x.active?1:.5}},
+      h('div',{className:'f1'},h('div',{className:'b'},x.name),h('div',{className:'mut xs ell'},x.sizes.length?`${x.sizes.length} sizes · ${x.sizes[0].size}–${x.sizes[x.sizes.length-1].size} · ${qn(x.sizes[0].cons)}–${qn(x.sizes[x.sizes.length-1].cons)} m`:'No size chart')),x.active?'›':Tag('Inactive')))));
 }
 
-// ── USERS / PASSWORD ────────────────────────────────────────────────────────
+// ── USERS / PASSWORD / MENU ─────────────────────────────────────────────────
 function Users({onClose}){
   const[us,load]=useLoad('/users');const[ed,setEd]=useState(null);
   return h(Sheet,{title:'Users',onClose,foot:h('button',{className:'btn',onClick:()=>setEd({name:'',email:'',password:'',role:'staff',active:1})},'+ Add user')},
@@ -672,19 +998,25 @@ function PasswordForm({onClose}){
   return h(Sheet,{title:'Change password',onClose,foot:h('button',{className:'btn',disabled:s.busy,onClick:()=>s.run(()=>POST('/auth/password',{old:o,new:n}))},'Save')},
     s.err&&h('div',{className:'err'},s.err),Fld('Current password',Inp(o,setO,{type:'password'})),Fld('New password',Inp(n,setN,{type:'password'}),'At least 6 characters'));
 }
-
-function MoreTab({user,open}){
-  const item=(t,s,fn)=>h('button',{className:'li',onClick:fn},h('div',{className:'f1'},h('div',{className:'b'},t),s?h('div',{className:'mut xs'},s):null),'›');
-  return h('div',{className:'page'},
-    h('div',{className:'card'},item('Manufacturing cost','Average cost per piece, by product & order',()=>open('costing'))),
+function MenuSheet({user,onClose,open}){
+  const item=(t,s,fn)=>h('button',{className:'li menu-li',onClick:fn},h('div',{className:'f1'},h('div',{className:'b'},t),s?h('div',{className:'mut xs'},s):null),'›');
+  return h(Sheet,{title:'Menu',onClose},
     h('div',{className:'h2'},'Masters'),
-    h('div',{className:'card'},item('Vendors','Cloth suppliers & tailors',()=>open('masterList',{kind:'vendors'})),
-      item('Cloth types','Fabric, colour, unit',()=>open('masterList',{kind:'cloths'})),
-      item('Products','Uniform items with default rate & cloth per piece',()=>open('masterList',{kind:'products'}))),
+    h('div',{className:'card'},item('Schools',null,()=>open('masterList',{kind:'schools'})),
+      item('Items & sizes','Uniform items, size chart and cloth per piece',()=>open('items')),
+      item('Cloth types','Fabric, colour, width',()=>open('masterList',{kind:'cloths'})),
+      item('Vendors','Cloth suppliers & tailors',()=>open('masterList',{kind:'vendors'}))),
     h('div',{className:'h2'},'Account'),
     h('div',{className:'card'},user.role==='admin'&&item('Users',null,()=>open('users')),item('Change password',null,()=>open('password')),
       h('button',{className:'li',style:{color:'var(--bad)'},onClick:logout},h('div',{className:'f1 b'},'Sign out'))),
     h('div',{className:'note',style:{textAlign:'center',marginTop:16}},`Signed in as ${user.name}`));
+}
+
+// opening a leftover-return move from the Cloth tab edits the delivery it came with
+function DeliveryLoader({deliveryId,onClose,open}){
+  const[ds]=useLoad('/stitch-deliveries');
+  useEffect(()=>{if(ds){const d=ds.find(x=>x.id===deliveryId);onClose();if(d)open('delivery',{orderId:d.order_id,initial:d});}},[ds]);
+  return h(Sheet,{title:'Loading…',onClose},Spin());
 }
 
 // ── APP ─────────────────────────────────────────────────────────────────────
@@ -692,54 +1024,59 @@ function App(){
   const[user,setUser]=useState(()=>{try{return TOKEN&&JSON.parse(localStorage.getItem('mu_user'));}catch{return null;}});
   const[tab,setTab]=useState('home');
   const[stack,setStack]=useState([]);   // open sheets, top is last
-  const[M,setM]=useState(null);const[v,setV]=useState(0);const[meta,setMeta]=useState({charge_heads:['Other']});
-  const loadM=()=>Promise.all([GET('/vendors'),GET('/cloths'),GET('/products')]).then(([vendors,cloths,products])=>setM({vendors,cloths,products}));
+  const[M,setM]=useState(null);const[v,setV]=useState(0);const[meta,setMeta]=useState({charge_heads:['Other'],std_width:58});
+  const loadM=()=>Promise.all([GET('/m/vendors'),GET('/m/schools'),GET('/m/cloths'),GET('/items'),GET('/line-defaults')])
+    .then(([vendors,schools,cloths,items,defaults])=>setM({vendors,schools,cloths,items,defaults}));
   useEffect(()=>{if(user){loadM();GET('/meta').then(setMeta);}},[user]);
   if(!user)return h(Fragment,null,h(Login,{onLogin:setUser}),h(Toast));
   if(!M)return Spin();
   const bump=()=>{setV(x=>x+1);loadM();};
-  const MM={...M,v,bump};
+  const MM={...M,v,bump,reload:loadM,std_width:meta.std_width};
   const open=(kind,props={})=>setStack(s=>[...s,{kind,props,key:Date.now()+Math.random()}]);
   const close=()=>setStack(s=>s.slice(0,-1));
   const done=msg=>()=>{close();toast(msg||'Saved');bump();};
-  const go=(t,sheet)=>{setTab(t);if(sheet)open(sheet);};
   const renderSheet=({kind,props,key})=>{
     const p={key,M:MM,onClose:close,open,user,...props};
     switch(kind){
-      case 'stitchOrder':return h(StitchOrderForm,{...p,heads:meta.charge_heads,onDone:done()});
+      case 'schoolOrder':return h(SchoolOrderForm,{...p,onDone:done()});
+      case 'schoolDetail':return h(SchoolDetail,p);
+      case 'stitchOrder':return h(StitchOrderForm,{...p,heads:meta.charge_heads,onDone:r=>{close();bump();
+        if(!props.initial&&r&&r.id){toast('Stitch order saved');open('material',{id:r.id});}else toast('Saved');}});
+      case 'material':return h(MaterialSheet,p);
       case 'clothOrder':return h(ClothOrderForm,{...p,onDone:done()});
       case 'despatch':return h(DespatchForm,{...p,onDone:done()});
       case 'transfer':return h(TransferForm,{...p,onDone:done()});
-      case 'delivery':return props.deliveryId&&!props.initial?h(DeliveryLoader,p):h(DeliveryForm,{...p,onDone:done()});
+      case 'delivery':return props.deliveryId?h(DeliveryLoader,p):h(DeliveryForm,{...p,onDone:done()});
       case 'pickOrderForDelivery':return h(PickOrderSheet,{...p,onPick:id=>{close();open('delivery',{orderId:id});}});
+      case 'bill':return h(BillForm,{...p,onDone:done()});
       case 'stitchDetail':return h(StitchDetail,p);
       case 'clothDetail':return h(ClothOrderDetail,p);
+      case 'stock':return h(StockView,p);
       case 'costing':return h(Costing,p);
+      case 'repSchools':return h(RepSchools,p);
+      case 'repTailors':return h(RepTailors,p);
       case 'masterList':return h(MasterList,p);
       case 'master':return h(MasterForm,{...p,onDone:done()});
+      case 'items':return h(ItemList,p);
+      case 'item':return h(ItemForm,{...p,onDone:done()});
       case 'users':return h(Users,p);
       case 'password':return h(PasswordForm,p);
+      case 'menu':return h(MenuSheet,p);
     }
   };
-  const tabs=[['home','Home'],['stitch','Stitching'],['cloth','Cloth'],['stock','Stock'],['more','More']];
-  const title={home:'Dashboard',stitch:'Stitching',cloth:'Cloth',stock:'Stock',more:'More'}[tab];
+  const tabs=[['home','Home'],['school','Schools'],['stitch','Stitching'],['cloth','Cloth'],['reports','Reports']];
+  const title={home:'Dashboard',school:'School orders',stitch:'Stitching',cloth:'Cloth',reports:'Reports'}[tab];
   return h(Fragment,null,
     h('div',{className:'app'},
-      h('div',{className:'top'},h('h1',null,h('small',null,FIRM),title)),
-      tab==='home'&&h(Home,{M:MM,go,open}),
+      h('div',{className:'top'},h('h1',null,h('small',null,FIRM),title),h('button',{className:'ib','aria-label':'Menu',onClick:()=>open('menu')},'☰')),
+      tab==='home'&&h(Home,{M:MM,open}),
+      tab==='school'&&h(SchoolsTab,{M:MM,open}),
       tab==='stitch'&&h(StitchTab,{M:MM,open}),
       tab==='cloth'&&h(ClothTab,{M:MM,open}),
-      tab==='stock'&&h(StockTab,{M:MM,open}),
-      tab==='more'&&h(MoreTab,{user,open})),
-    h('nav',{className:'nav'},h('div',{className:'nav-in'},tabs.map(([k,l])=>h('button',{key:k,className:tab===k?'on':'',onClick:()=>setTab(k)},I(ICONS[k==='stitch'?'stitch':k]),l)))),
+      tab==='reports'&&h(ReportsTab,{open})),
+    h('nav',{className:'nav'},h('div',{className:'nav-in'},tabs.map(([k,l])=>h('button',{key:k,className:tab===k?'on':'',onClick:()=>setTab(k)},I(ICONS[k]),l)))),
     stack.map(renderSheet),
     h(Toast));
-}
-// opening a leftover-return move from the Cloth tab edits the delivery it came with
-function DeliveryLoader({M,deliveryId,orderId,onClose,open}){
-  const[ds]=useLoad('/stitch-deliveries');
-  useEffect(()=>{if(ds){const d=ds.find(x=>x.id===deliveryId);onClose();if(d)open('delivery',{orderId:d.order_id,initial:d});}},[ds]);
-  return h(Sheet,{title:'Loading…',onClose},Spin());
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(h(App));
