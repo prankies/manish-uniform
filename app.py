@@ -5,7 +5,7 @@ Flow: cloth order to cloth vendor -> cloth despatched (to a stitching vendor or 
 -> stitch order to stitching vendor -> stitched goods despatched back to us.
 Cloth stock is tracked per location ('self' = Manish Uniform, or a stitch vendor id).
 """
-import sqlite3, os, sys, json, hashlib, hmac, base64, time, uuid, shutil, threading, collections
+import sqlite3, os, sys, json, hashlib, hmac, base64, time, uuid, shutil, threading, collections, secrets
 from datetime import datetime, date
 from functools import wraps
 from flask import Flask, request, jsonify, g
@@ -27,9 +27,17 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.environ.get('DATA_DIR') or os.path.join(BASE, 'data')
 DB_PATH = os.path.join(DATA_DIR, 'manish.db')
 BACKUP_DIR = os.path.join(DATA_DIR, 'backups')
-JWT_SECRET = os.environ.get('JWT_SECRET', 'manish-uniform-change-me')
-if os.environ.get('RAILWAY_ENVIRONMENT') and JWT_SECRET == 'manish-uniform-change-me':
-    raise SystemExit('JWT_SECRET must be set in the Railway service variables')
+os.makedirs(DATA_DIR, exist_ok=True)
+
+def _jwt_secret():
+    """JWT_SECRET from env, else a random one generated once and kept beside the database,
+    so a fresh deploy never runs on a guessable default."""
+    if os.environ.get('JWT_SECRET'): return os.environ['JWT_SECRET']
+    path = os.path.join(DATA_DIR, '.jwt_secret')
+    if not os.path.exists(path):
+        with open(path, 'w') as f: f.write(secrets.token_hex(32))
+    with open(path) as f: return f.read().strip()
+JWT_SECRET = _jwt_secret()
 PORT = int(os.environ.get('PORT', 5004))
 BACKUP_KEEP_DAYS = int(os.environ.get('BACKUP_KEEP_DAYS', 30))
 os.makedirs(BACKUP_DIR, exist_ok=True)
@@ -169,9 +177,14 @@ def init_db():
       at TEXT DEFAULT CURRENT_TIMESTAMP);
     """)
     if not db.execute("SELECT 1 FROM users LIMIT 1").fetchone():
+        email = os.environ.get('ADMIN_EMAIL', 'admin@manishuniform.com').strip().lower()
+        pw = os.environ.get('ADMIN_PASSWORD')
+        if not pw:
+            # Hosted: never seed a known password. Printed once so it can be read from the deploy log.
+            pw = secrets.token_urlsafe(9) if os.environ.get('RAILWAY_ENVIRONMENT') else 'admin123'
+            print(f'[Setup] First admin login: {email} / {pw}  (change it after signing in)', flush=True)
         db.execute("INSERT INTO users(id,name,email,password,role) VALUES(?,?,?,?,?)",
-                   (uid(), 'Admin', os.environ.get('ADMIN_EMAIL', 'admin@manishuniform.com').strip().lower(),
-                    hash_pw(os.environ.get('ADMIN_PASSWORD', 'admin123')), 'admin'))
+                   (uid(), 'Admin', email, hash_pw(pw), 'admin'))
     db.commit(); db.close()
 
 def require_auth(f):
