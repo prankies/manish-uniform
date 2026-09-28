@@ -1,0 +1,7 @@
+.env
+data/
+__pycache__/
+.claude/
+.git/
+*.bat
+README.md
