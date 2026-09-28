@@ -46,3 +46,13 @@ so until then it shows as "on the way".
 - `.env`: `JWT_SECRET`, `PORT=5004`
 
 Roles: **staff** can enter and edit everything. **admin** can also delete and manage users.
+
+## Hosting (Railway): https://uniform.gpci.in
+- Railway project `manish-uniform`, service `manish-uniform`, deployed from GitHub
+  `prankies/manish-uniform` (branch `main`). Every push to `main` redeploys.
+- Volume `manish-uniform-volume` is mounted at `/data`; `DATA_DIR=/data` is set in the Dockerfile.
+  The database, daily backups and the generated JWT secret (`/data/.jwt_secret`) live there.
+- On a fresh volume the first admin password is random and printed once in the deploy log
+  (`railway logs --deployment`). `ADMIN_EMAIL` / `ADMIN_PASSWORD` variables override it.
+- DNS (Cloudflare, gpci.in): CNAME `uniform` → the target shown by `railway domain list`,
+  plus the `_railway-verify.uniform` TXT record.
