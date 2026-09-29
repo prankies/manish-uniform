@@ -466,7 +466,8 @@ function StitchOrderForm({M,initial,schoolOrderId,onClose,onDone,heads}){
         Fld('Stitching ₹/pc',NumInp(b.rate,v=>setB(i,{rate:v})))),
       h(SizeGrid,{M,itemId:b.item_id,sizes:b.sizes,onSet:setSize(i),withCons:true,width:b.width,
         hints:Object.fromEntries(Object.entries(b.sizes).filter(([,r])=>r.done).map(([sz,r])=>[sz,qn(r.done)+' recd']))}),
-      blockPcs(b)?h('div',{className:'sub'},`${qn(blockPcs(b))} pcs · ${qn(blockCloth(b))} m cloth${num(b.rate)?' · '+rs(blockPcs(b)*num(b.rate)):''}`):null)),
+      blockPcs(b)&&!b.cloth_id?h('div',{className:'sub',style:{color:'var(--bad)'}},`${qn(blockPcs(b))} pcs · choose the cloth so the material needed can be worked out`):null,
+      blockPcs(b)&&b.cloth_id?h('div',{className:'sub'},`${qn(blockPcs(b))} pcs · ${qn(blockCloth(b))} m cloth${num(b.rate)?' · '+rs(blockPcs(b)*num(b.rate)):''}`):null)),
     h('button',{className:'btn sec blk',style:{marginBottom:12},onClick:()=>setF(x=>({...x,blocks:[...x.blocks,newStitchBlock(M,'',x.blocks.length?x.blocks[x.blocks.length-1].school_id:'')]}))},'+ Add another item'),
     pcs>0&&h('div',{className:'sum'},h('div',{className:'b'},`Material required`),
       Object.keys(need).length?Object.entries(need).map(([c,q])=>h('div',{key:c},`${clothOf(M,c).name}: ${qn(q)} m`)):h('div',null,'Choose cloth for each item to see metres needed'),
@@ -483,10 +484,30 @@ function StitchOrderForm({M,initial,schoolOrderId,onClose,onDone,heads}){
 }
 
 // ── MATERIAL REQUIRED (shown after saving a stitch order, and from its detail) ──
+// Stitch lines the requirement can't count yet (no cloth chosen / no cloth-per-piece), fixable in place.
+function GapsBox({M,gaps,ids,onFixed}){
+  if(!gaps||!gaps.length)return null;
+  return h(Fragment,null,
+    h('div',{className:'err',style:{marginBottom:8}},'Some items have no cloth set, so their cloth can\'t be counted yet. Choose it below:'),
+    gaps.map(g=>h(GapRow,{key:g.order_id+g.item_id+(g.school_id||'')+g.reason,M,g,ids,onFixed})));
+}
+function GapRow({M,g,ids,onFixed}){
+  const[cloth,setCloth]=useState('');const[width,setWidth]=useState('');const[cons,setCons]=useState('');const s=useSaver(onFixed);
+  const go=()=>s.run(()=>POST('/stitch-orders/fill-cloth',{stitch_order_ids:ids,item_id:g.item_id,school_id:g.school_id,cloth_id:cloth,width,cons_per_pc:cons}));
+  return h('div',{className:'blk'},
+    h('div',{className:'sm b'},`${g.number} · ${g.item_name}${g.school_name?' · '+g.school_name:''}`),
+    h('div',{className:'sub',style:{marginTop:2}},`${qn(g.pcs)} pcs · sizes ${g.sizes} · `+(g.reason==='no_cloth'?'no cloth chosen':'no cloth-per-piece for these sizes')),
+    s.err&&h('div',{className:'err'},s.err),
+    g.reason==='no_cloth'?h(Fragment,null,
+      Fld('Cloth for these pieces',h(SelAdd,{value:cloth,onChange:v=>{setCloth(v);setWidth(clothOf(M,v).width||'');},opts:clothOpts(M,cloth),placeholder:'Select cloth',noun:'cloth',onAdd:addCloth(M)})),
+      h('div',{className:'g2'},Fld('Width (inch)',NumInp(width,setWidth)),Fld('Cloth/pc (m)',NumInp(cons,setCons,{placeholder:'from chart'})))):
+      Fld('Cloth per piece (m)',NumInp(cons,setCons)),
+    h('button',{className:'btn sm',style:{marginBottom:10},disabled:s.busy||(g.reason==='no_cloth'?!cloth:!num(cons)),onClick:go},s.busy?'Saving…':'Set on stitch order'));
+}
 // Per cloth: what finishing the orders needs, what is already arranged, and what is left to order.
 // ordering(cloth_id) = qty on the cloth order being edited (form only); onOrderLabel names the on-order line.
 function ReqCards({req,ordering,onOrderLabel}){
-  if(!req.length)return h('div',{className:'card'},Empty('No cloth set on these stitch orders'));
+  if(!req.length)return null;
   return req.map(r=>{const u=r.unit||'m';const need=Math.ceil(r.to_order);const o=ordering?ordering(r.cloth_id):null;const diff=o!=null?o-r.to_order:null;
     const row=(l,v,bold)=>[h('dt',{key:l+'t',className:bold?'b':'',style:bold?{color:'var(--tx)'}:null},l),h('dd',{key:l+'d',style:bold?{fontSize:16,color:need>0?'var(--bad)':'var(--ok)'}:null},v)];
     return h('div',{key:r.cloth_id,className:'card cp'},
@@ -510,6 +531,7 @@ function MaterialSheet({M,id,onClose,open}){
   const linkedIds=o.cloth_orders.map(c=>c.id);
   return h(Sheet,{title:'Material required · '+o.number,onClose,foot:h('button',{className:'btn sec',onClick:onClose},'Done')},
     h('div',{className:'note'},`Cloth needed for the pieces ${o.vendor_name} has not yet delivered, less what is already with him or coming on linked cloth orders.`),
+    h(GapsBox,{M,gaps:o.requirement_gaps,ids:[id],onFixed:()=>{toast('Cloth set');M.bump();}}),
     h(ReqCards,{req:o.requirement}),
     o.cloth_orders.length>0&&h(Fragment,null,h('div',{className:'h2'},'Linked cloth orders'),h('div',{className:'card'},o.cloth_orders.map(c=>h('button',{key:c.id,className:'li',onClick:()=>open('clothDetail',{id:c.id})},
       h('div',{className:'f1'},h('div',{className:'sm b'},c.number+' · '+c.vendor_name),h('div',{className:'mut xs'},fd(c.date))),'›')))),
@@ -528,8 +550,11 @@ function ClothOrderForm({M,initial,prefill,onClose,onDone}){
     :{date:today(),vendor_id:'',notes:'',items:[{...blank}],stitch_order_ids:[]};
     if(prefill){b.stitch_order_ids=prefill.stitch_order_ids||b.stitch_order_ids;if(prefill.items)b.items=prefill.items.map(x=>({...blank,...x}));}return b;});
   const[sos]=useLoad('/stitch-orders',[M.v]);
-  const[req,setReq]=useState([]);
-  useEffect(()=>{if(!f.stitch_order_ids.length){setReq([]);return;}GET('/requirement?stitch_order_ids='+f.stitch_order_ids.join(',')+(f.id?'&exclude_cloth_order='+f.id:'')).then(setReq);},[f.stitch_order_ids.join(',')]);
+  const[rq,setRq]=useState(null);const[rqV,setRqV]=useState(0);
+  const ids=f.stitch_order_ids.join(',');
+  useEffect(()=>{if(!ids){setRq(null);return;}setRq('loading');
+    GET('/requirement?stitch_order_ids='+ids+(f.id?'&exclude_cloth_order='+f.id:'')).then(setRq).catch(e=>setRq({error:e.message}));},[ids,rqV]);
+  const req=rq&&rq.cloths||[];
   const set=k=>v=>setF(x=>({...x,[k]:v}));
   // rate and amount stay in step: typing one works out the other
   const setI=(i,k)=>v=>setF(x=>({...x,items:x.items.map((r,j)=>{if(j!==i)return r;const n={...r,[k]:v};
@@ -554,7 +579,10 @@ function ClothOrderForm({M,initial,prefill,onClose,onDone}){
     h('div',{className:'card'},!sos?Spin():soList.length?soList.map(o=>h('label',{key:o.id,className:'li',style:{cursor:'pointer'}},
       h('input',{type:'checkbox',checked:f.stitch_order_ids.includes(o.id),onChange:()=>toggle(o.id),style:{width:20,height:20}}),
       h('div',{className:'f1'},h('div',{className:'sm b'},`${o.number} · ${o.vendor_name}`),h('div',{className:'mut xs ell'},`${fd(o.date)} · ${qn(o.qty)} pcs${o.schools?' · '+o.schools:''}`)))):Empty('No open stitch orders')),
-    req.length>0&&h(Fragment,null,h('div',{className:'h2'},'Cloth required for these stitch orders'),
+    rq&&h(Fragment,null,h('div',{className:'h2'},'Cloth required for these stitch orders'),
+      rq==='loading'?Spin():rq.error?h('div',{className:'err'},'Could not work out the requirement: '+rq.error):null,
+      rq.gaps&&h(GapsBox,{M,gaps:rq.gaps,ids:f.stitch_order_ids,onFixed:()=>{toast('Cloth set on stitch order');setRqV(v=>v+1);M.bump();}}),
+      rq.cloths&&!rq.cloths.length&&!rq.gaps.length&&h('div',{className:'card'},Empty('These stitch orders need no cloth')),
       h(ReqCards,{req,ordering,onOrderLabel:'Coming on other cloth orders'}),
       req.some(r=>r.to_order>0)&&h('button',{className:'btn blk',style:{marginBottom:6},onClick:fill},'Fill quantities with the amount to order'),
       h('div',{className:'note'},'Order more than this if the vendor has a minimum order quantity — the extra stays in stock.')),
@@ -727,6 +755,7 @@ function StitchDetail({M,id,user,onClose,open}){
           h('td',{className:'n'},qn(i.received),i.delivered>i.received?h('div',{className:'xs mut'},`+${qn(i.delivered-i.received)} transit`):null),
           h('td',{className:'n'},i.cons_per_pc?qn(i.qty*i.cons_per_pc):'—'),h('td',{className:'n'},i.cloth_used?qn(i.cloth_used):'—')))))));}),
     h('div',{className:'h2'},'Material required'),
+    h(GapsBox,{M,gaps:o.requirement_gaps,ids:[id],onFixed:()=>{toast('Cloth set');M.bump();}}),
     h(ReqCards,{req:o.requirement}),
     o.cloth_orders.length>0&&h('div',{className:'card'},o.cloth_orders.map(co=>h('button',{key:co.id,className:'li',onClick:()=>open('clothDetail',{id:co.id})},
       h('div',{className:'f1'},h('div',{className:'sm b'},'Cloth order '+co.number),h('div',{className:'mut xs'},co.vendor_name+' · '+fd(co.date))),'›'))),
@@ -775,6 +804,7 @@ function ClothOrderDetail({M,id,user,onClose,open}){
       h('div',{className:'card'},o.stitch_orders.map(s=>h('button',{key:s.id,className:'li',onClick:()=>open('stitchDetail',{id:s.id})},
         h('div',{className:'f1'},h('div',{className:'sm b'},s.number+' · '+s.vendor_name),h('div',{className:'mut xs'},fd(s.date))),'›'))),
       h('div',{className:'note'},'Cloth still needed to finish these stitch orders, counting this order and any other linked ones:'),
+      h(GapsBox,{M,gaps:o.requirement_gaps,ids:o.stitch_orders.map(x=>x.id),onFixed:()=>{toast('Cloth set');M.bump();}}),
       h(ReqCards,{req:o.requirement}))
       :h('div',{className:'card'},Empty('Not linked to any stitch order — use Edit to tick the stitch orders this cloth is for')),
     h('div',{className:'h2'},`Despatches · ${rs(dAmt)}`),

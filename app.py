@@ -631,6 +631,7 @@ def get_cloth_order(i):
     o['items'] = _cloth_order_items(i)
     o['stitch_orders'] = _linked_stitch(i)
     o['requirement'] = requirement([s['id'] for s in o['stitch_orders']])
+    o['requirement_gaps'] = requirement_gaps([s['id'] for s in o['stitch_orders']])
     o['despatches'] = rows(q("""SELECT d.*, c.name cloth_name, c.unit, COALESCE(sv.name, 'Manish Uniform') dest_name
         FROM cloth_despatches d JOIN cloths c ON c.id=d.cloth_id LEFT JOIN vendors sv ON sv.id=d.dest
         WHERE d.order_id=? ORDER BY d.despatch_date, d.number""", (i,)))
@@ -863,6 +864,7 @@ def get_stitch_order(i):
         JOIN cloth_orders co ON co.id=l.cloth_order_id JOIN vendors v ON v.id=co.vendor_id
         WHERE l.stitch_order_id=? ORDER BY co.date""", (i,)))
     o['requirement'] = requirement([i])
+    o['requirement_gaps'] = requirement_gaps([i])
     o['costing'] = costing(order_id=i)
     return jsonify(o)
 
@@ -1129,11 +1131,57 @@ def requirement(stitch_order_ids, exclude_cloth_order=None):
         n['short'] = n['to_order']
     return need
 
+def requirement_gaps(stitch_order_ids):
+    """Stitch lines left out of the requirement: no cloth chosen, or no cloth-per-piece."""
+    if not stitch_order_ids: return []
+    ph = ','.join('?' * len(stitch_order_ids))
+    return rows(q(f"""SELECT i.order_id, so.number, i.item_id, it.name item_name, i.school_id, sc.name school_name,
+        CASE WHEN i.cloth_id IS NULL THEN 'no_cloth' ELSE 'no_cons' END reason,
+        GROUP_CONCAT(COALESCE(i.size,'—'), ', ') sizes, SUM(i.qty) pcs
+        FROM stitch_order_items i JOIN stitch_orders so ON so.id=i.order_id JOIN items it ON it.id=i.item_id
+        LEFT JOIN schools sc ON sc.id=i.school_id
+        WHERE i.order_id IN ({ph}) AND (i.cloth_id IS NULL OR COALESCE(i.cons_per_pc,0)=0)
+        GROUP BY i.order_id, i.item_id, i.school_id, reason ORDER BY so.number, it.sort""", stitch_order_ids))
+
 @app.route('/api/requirement')
 @require_auth
 def requirement_api():
     ids = [x for x in (request.args.get('stitch_order_ids') or '').split(',') if x]
-    return jsonify(requirement(ids, request.args.get('exclude_cloth_order')))
+    return jsonify({'cloths': requirement(ids, request.args.get('exclude_cloth_order')), 'gaps': requirement_gaps(ids)})
+
+def chart_cons(item_id, size, width):
+    """Cloth per piece from the item's size chart, scaled to the cloth width (0 if no chart entry)."""
+    it = q("SELECT base_width, width_scaling FROM items WHERE id=?", (item_id,), one=True)
+    s = q("SELECT cons FROM item_sizes WHERE item_id=? AND size=?", (item_id, size or ''), one=True)
+    if not it or not s: return 0
+    f = (it['base_width'] / width) if it['width_scaling'] and width else 1
+    return round(s['cons'] * f, 2)
+
+@app.route('/api/stitch-orders/fill-cloth', methods=['POST'])
+@require_auth
+def fill_cloth():
+    """Complete stitch lines that were saved without cloth or cloth-per-piece — from the
+    cloth order screen. Only lines missing the value are touched."""
+    d = request.json or {}
+    ids = d.get('stitch_order_ids') or []
+    if not ids or not d.get('item_id'): return err('Nothing to update')
+    ph = ','.join('?' * len(ids))
+    lines = q(f"""SELECT * FROM stitch_order_items WHERE order_id IN ({ph}) AND item_id=? AND COALESCE(school_id,'')=?""",
+              (*ids, d['item_id'], d.get('school_id') or ''))
+    n = 0
+    for l in lines:
+        cloth_id, width, cons = l['cloth_id'], l['width'], l['cons_per_pc'] or 0
+        if not cloth_id and d.get('cloth_id'):
+            cloth_id = d['cloth_id']
+            width = num(d.get('width')) or (q("SELECT width FROM cloths WHERE id=?", (cloth_id,), one=True) or {'width': None})['width']
+        if not cloth_id: continue
+        if not cons:
+            cons = num(d.get('cons_per_pc')) or chart_cons(l['item_id'], l['size'], width)
+        if (cloth_id, width, cons) != (l['cloth_id'], l['width'], l['cons_per_pc'] or 0):
+            qw("UPDATE stitch_order_items SET cloth_id=?, width=?, cons_per_pc=? WHERE id=?", (cloth_id, width, cons, l['id']))
+            n += 1
+    audit('fill_cloth', 'stitch_order', ','.join(ids), f"{n} lines")
+    return jsonify({'updated': n})
 
 # ── COSTING ───────────────────────────────────────────────────────────────────
 def costing(order_id=None):
