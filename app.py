@@ -274,6 +274,30 @@ def init_db():
             for k, (size, cons) in enumerate(chart):
                 db.execute("INSERT INTO item_sizes(id,item_id,size,cons,sort) VALUES(?,?,?,?,?)", (uid(), iid, size, cons, k))
     db.commit(); db.close()
+    reset_orders_once()
+
+# Child tables before parents, so foreign keys never block a delete.
+ORDER_TABLES = ['cloth_order_links', 'cloth_despatches', 'stitch_delivery_items', 'stitch_deliveries', 'cloth_transfers',
+                'stitch_bills', 'stitch_charges', 'stitch_order_items', 'stitch_orders', 'cloth_order_items',
+                'cloth_orders', 'school_order_items', 'school_orders']
+
+def reset_orders_once():
+    """Wipe all orders, despatches, moves and bills (masters and users stay) when the
+    RESET_ORDERS variable is set. Runs once per value: a marker file on the data volume
+    records it, so restarts with the variable still set do nothing. Backs up first."""
+    tag = (os.environ.get('RESET_ORDERS') or '').strip()
+    if not tag: return
+    marker = os.path.join(DATA_DIR, f'.reset_orders_{"".join(c for c in tag if c.isalnum() or c in "-_")}')
+    if os.path.exists(marker): return
+    dest = os.path.join(BACKUP_DIR, f"pre_reset_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db")
+    src = sqlite3.connect(DB_PATH); dst = sqlite3.connect(dest)
+    src.backup(dst); dst.close()
+    counts = {t: src.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in ORDER_TABLES}
+    for t in ORDER_TABLES:
+        src.execute(f"DELETE FROM {t}")
+    src.commit(); src.close()
+    with open(marker, 'w') as f: f.write(datetime.now().isoformat())
+    print(f'[Reset] Orders & stock cleared ({tag}); backup at {dest}; removed {counts}', flush=True)
 
 def require_auth(f):
     @wraps(f)
